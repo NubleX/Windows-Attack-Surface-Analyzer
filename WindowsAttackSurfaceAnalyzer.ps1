@@ -521,14 +521,14 @@ function Show-Summary {
 # Main execution
 function Main {
     Write-ColorOutput @"
-╔══════════════════════════════════════════╗
-║       Windows Attack Surface Analyzer    ║
-║                                          ║
-║  Comprehensive Security Assessment Tool  ║
-║                                          ║
-║  Author: NubleX / Igor Dunaev            ║
-║  Version: 0.1.0                          ║
-╚══════════════════════════════════════════╝
+==============================================
+       Windows Attack Surface Analyzer    
+                                          
+  Comprehensive Security Assessment Tool  
+                                          
+  Author: NubleX / Igor Dunaev            
+  Version: 0.1.0                          
+==============================================
 "@ 'Header'
     
     Write-ColorOutput "`nStarting security analysis..." 'Info'
