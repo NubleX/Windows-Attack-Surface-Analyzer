@@ -1,0 +1,9 @@
+- **Core Maintainers** - Long-term project stewardship
+- 
+- **Security Researchers** - Significant security improvements
+- 
+- **Feature Contributors** - Major feature additions
+- 
+- **Bug Hunters** - Critical bug fixes and improvements
+- 
+- **Documentation Heroes** - Substantial documentation contributions
