@@ -1,24 +1,57 @@
 # Windows Attack Surface Analyzer
 # A comprehensive security assessment tool for Windows systems
 # Created by NubleX / Igor Dunaev, 2025
-# 
+#
 # Authors: Security Community
-# Version: 0.1.0
+# Version: 0.2.0
 # License: MIT
 # GitHub: https://github.com/NubleX/Windows-Attack-Surface-Analyzer
 #
-# USAGE: Run as Administrator in PowerShell
-# .\WindowsAttackSurfaceAnalyzer.ps1
+# USAGE: Double-click Run-Analysis.bat  OR  run as Administrator in PowerShell:
+#        .\WindowsAttackSurfaceAnalyzer.ps1 [-Detailed] [-Export] [-OutputPath <path>]
 #
 # DESCRIPTION:
 # This script analyzes your Windows system for potential security vulnerabilities
 # and provides recommendations for hardening your attack surface.
+# Compatible with Windows 10 and Windows 11 (all versions).
+# Works with PowerShell 5.1 and PowerShell 7+.
 
 param(
     [switch]$Detailed,  # Show detailed output
     [switch]$Export,    # Export results to file
     [string]$OutputPath = ".\SecurityReport.html"
 )
+
+# ── Detect OS version and PowerShell version ──────────────────────────────────
+$script:PSMajor = $PSVersionTable.PSVersion.Major
+try {
+    $script:_os        = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+    $script:WinBuild   = [int]$script:_os.BuildNumber
+    $script:OSCaption  = $script:_os.Caption
+    $script:OSArch     = $script:_os.OSArchitecture
+} catch {
+    $script:WinBuild  = 0
+    $script:OSCaption = "Unknown Windows"
+    $script:OSArch    = "Unknown"
+}
+$script:IsWindows11     = $script:WinBuild -ge 22000   # Windows 11 21H2+
+$script:IsWin1122H2Plus = $script:WinBuild -ge 22621   # Windows 11 22H2+ (Smart App Control)
+$script:IsWin1124H2Plus = $script:WinBuild -ge 26100   # Windows 11 24H2+ (Recall)
+$script:IsWindows10     = ($script:WinBuild -ge 10240) -and (-not $script:IsWindows11)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Scan progress tracking ────────────────────────────────────────────────────
+$script:ScanStep  = 0
+$script:ScanTotal = 13
+function Write-ScanProgress {
+    param([string]$Section)
+    $script:ScanStep++
+    $pct = [int](($script:ScanStep / $script:ScanTotal) * 100)
+    Write-Progress -Activity "Windows Attack Surface Analyzer" `
+                   -Status "[$script:ScanStep/$script:ScanTotal] $Section" `
+                   -PercentComplete $pct
+}
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Color coding for output
 $Colors = @{
@@ -477,85 +510,532 @@ function Export-Results {
     
     try {
         $html | Out-File -FilePath $OutputPath -Encoding UTF8
-        Write-ColorOutput "Report exported successfully to: $OutputPath" 'Good'
+        Write-ColorOutput "Report saved to: $OutputPath" 'Good'
+
+        # Auto-open in default browser
+        try { Start-Process $OutputPath } catch { }
     } catch {
         Write-ColorOutput "Failed to export report: $($_.Exception.Message)" 'Critical'
     }
 }
 
+function Get-HardwareSecurity {
+    Write-ColorOutput "`n9. HARDWARE SECURITY (TPM / SECURE BOOT / VBS)" 'Header'
+    Write-ColorOutput "================================================" 'Header'
+
+    # ── TPM ──────────────────────────────────────────────────────────────────
+    try {
+        $tpm = Get-CimInstance -Namespace root\CIMv2\Security\MicrosoftTpm `
+                               -ClassName Win32_Tpm -ErrorAction SilentlyContinue
+        if ($tpm) {
+            if ($tpm.IsEnabled_InitialValue) {
+                # SpecVersion is like "2.0, 1.2, ..." – take the first token
+                $tpmVer = ($tpm.SpecVersion -split ',')[0].Trim()
+                $tpmRisk = if ($tpmVer -like '2*') { 'Good' } else { 'Medium' }
+                Add-Finding 'Hardware' 'TPM' "Enabled (v$tpmVer)" $tpmRisk `
+                    "Trusted Platform Module provides hardware-based security root"
+            } else {
+                Add-Finding 'Hardware' 'TPM' 'Disabled' 'High' `
+                    'TPM chip found but disabled in BIOS/UEFI' `
+                    'Enable TPM in BIOS/UEFI firmware settings'
+            }
+        } else {
+            Add-Finding 'Hardware' 'TPM' 'Not Found' 'High' `
+                'No TPM detected – may be disabled in BIOS/UEFI or not present' `
+                'Check BIOS/UEFI for a TPM or PTT (Platform Trust Technology) setting'
+        }
+    } catch {
+        Add-Finding 'Hardware' 'TPM' 'Check Failed' 'Medium' `
+            "Could not read TPM status: $($_.Exception.Message)"
+    }
+
+    # ── Secure Boot ───────────────────────────────────────────────────────────
+    try {
+        $sb = Confirm-SecureBootUEFI -ErrorAction Stop
+        if ($sb) {
+            Add-Finding 'Hardware' 'Secure Boot' 'Enabled' 'Good' `
+                'UEFI Secure Boot is active – blocks unsigned boot code'
+        } else {
+            Add-Finding 'Hardware' 'Secure Boot' 'Disabled' 'High' `
+                'Secure Boot is off – bootkits and rootkits can load at startup' `
+                'Enable Secure Boot in BIOS/UEFI settings'
+        }
+    } catch [System.PlatformNotSupportedException] {
+        Add-Finding 'Hardware' 'Secure Boot' 'Not Supported' 'Medium' `
+            'System is using Legacy BIOS – Secure Boot requires UEFI firmware'
+    } catch {
+        Add-Finding 'Hardware' 'Secure Boot' 'Check Failed' 'Low' `
+            "Could not determine Secure Boot status: $($_.Exception.Message)"
+    }
+
+    # ── Virtualization-Based Security / HVCI / Credential Guard ──────────────
+    try {
+        $dg = Get-CimInstance -ClassName Win32_DeviceGuard `
+                              -Namespace root\Microsoft\Windows\DeviceGuard `
+                              -ErrorAction SilentlyContinue
+        if ($dg) {
+            # VBS running states: 0=Off, 1=Configured, 2=Running
+            if ($dg.VirtualizationBasedSecurityStatus -eq 2) {
+                Add-Finding 'Hardware' 'Virtualization-Based Security (VBS)' 'Running' 'Good' `
+                    'VBS isolates sensitive OS processes from the kernel'
+            } else {
+                Add-Finding 'Hardware' 'Virtualization-Based Security (VBS)' 'Not Running' 'Medium' `
+                    'VBS provides strong protection against credential theft and kernel exploits' `
+                    'Enable in Windows Security > Device Security > Core isolation'
+            }
+
+            # HVCI (Memory Integrity)
+            if ($dg.CodeIntegrityPolicyEnforcementStatus -eq 2) {
+                Add-Finding 'Hardware' 'Memory Integrity (HVCI)' 'Enabled' 'Good' `
+                    'Hypervisor blocks unsigned kernel-mode drivers'
+            } else {
+                Add-Finding 'Hardware' 'Memory Integrity (HVCI)' 'Disabled' 'Medium' `
+                    'Memory Integrity prevents malicious drivers from loading' `
+                    'Enable in Windows Security > Device Security > Core isolation details'
+            }
+
+            # Credential Guard (service ID 1)
+            if ($dg.SecurityServicesRunning -and ($dg.SecurityServicesRunning -contains 1)) {
+                Add-Finding 'Hardware' 'Credential Guard' 'Running' 'Good' `
+                    'Credential Guard isolates login secrets in a secure enclave'
+            } else {
+                Add-Finding 'Hardware' 'Credential Guard' 'Not Running' 'Low' `
+                    'Credential Guard protects domain credentials from pass-the-hash attacks'
+            }
+
+            # Kernel DMA Protection
+            if ($dg.KernelDmaProtectionStatus -eq 2) {
+                Add-Finding 'Hardware' 'Kernel DMA Protection' 'Enabled' 'Good' `
+                    'Blocks DMA attacks via Thunderbolt and other external ports'
+            } else {
+                Add-Finding 'Hardware' 'Kernel DMA Protection' 'Not Active' 'Low' `
+                    'Kernel DMA Protection guards against physical port (e.g. Thunderbolt) attacks'
+            }
+        } else {
+            Add-Finding 'Hardware' 'VBS / Device Guard' 'Unavailable' 'Info' `
+                'Device Guard information not accessible on this system'
+        }
+    } catch {
+        Add-Finding 'Hardware' 'VBS / Device Guard' 'Check Failed' 'Medium' `
+            "Could not read VBS/Device Guard status: $($_.Exception.Message)"
+    }
+}
+
+function Get-BitLockerStatus {
+    Write-ColorOutput "`n10. DISK ENCRYPTION (BITLOCKER)" 'Header'
+    Write-ColorOutput "=================================" 'Header'
+
+    try {
+        $volumes = Get-BitLockerVolume -ErrorAction SilentlyContinue
+        if ($null -eq $volumes) {
+            Add-Finding 'Encryption' 'BitLocker' 'Check Requires Admin' 'Medium' `
+                'Run as Administrator to see BitLocker status for all drives' `
+                'Right-click PowerShell and choose "Run as administrator"'
+            return
+        }
+
+        foreach ($vol in $volumes) {
+            $mount  = $vol.MountPoint
+            $status = $vol.ProtectionStatus   # On / Off / Unknown
+            $pct    = $vol.EncryptionPercentage
+
+            if ($status -eq 'On') {
+                $protectors = ($vol.KeyProtector | ForEach-Object { $_.KeyProtectorType }) -join ', '
+                Add-Finding 'Encryption' "Drive $mount" "Encrypted ($pct%)" 'Good' `
+                    "BitLocker active. Protectors: $protectors"
+            } elseif ($pct -gt 0) {
+                Add-Finding 'Encryption' "Drive $mount" "Encrypting ($pct%)" 'Low' `
+                    'BitLocker encryption is in progress – leave the device on'
+            } else {
+                $risk = if ($mount -eq 'C:\') { 'High' } else { 'Medium' }
+                Add-Finding 'Encryption' "Drive $mount" 'Not Encrypted' $risk `
+                    'Anyone with physical access to this drive can read all files' `
+                    'Enable BitLocker: Start > Settings > Privacy & Security > Device encryption'
+            }
+        }
+
+        if ($volumes.Count -eq 0) {
+            Add-Finding 'Encryption' 'BitLocker' 'No Volumes Found' 'Medium' `
+                'No BitLocker-eligible volumes detected'
+        }
+    } catch {
+        Add-Finding 'Encryption' 'BitLocker' 'Check Failed' 'Medium' `
+            "Could not check BitLocker status: $($_.Exception.Message)"
+    }
+}
+
+function Get-AdvancedDefender {
+    Write-ColorOutput "`n11. ADVANCED DEFENDER ANALYSIS" 'Header'
+    Write-ColorOutput "================================" 'Header'
+
+    try {
+        $pref   = Get-MpPreference    -ErrorAction SilentlyContinue
+        $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
+
+        if (-not $pref -or -not $status) {
+            Add-Finding 'Defender' 'Advanced Analysis' 'Unavailable' 'Medium' `
+                'Could not access Defender settings – may not be the active antivirus'
+            return
+        }
+
+        # Tamper Protection
+        if ($status.IsTamperProtected) {
+            Add-Finding 'Defender' 'Tamper Protection' 'Enabled' 'Good' `
+                'Defender settings are locked against unauthorised changes'
+        } else {
+            Add-Finding 'Defender' 'Tamper Protection' 'Disabled' 'High' `
+                'Malware could silently disable Windows Defender' `
+                'Enable Tamper Protection: Windows Security > Virus protection > Manage settings'
+        }
+
+        # Cloud-delivered Protection
+        if ($pref.MAPSReporting -ne 0) {
+            Add-Finding 'Defender' 'Cloud Protection' 'Enabled' 'Good' `
+                'Cloud-delivered protection gives near-instant threat intelligence'
+        } else {
+            Add-Finding 'Defender' 'Cloud Protection' 'Disabled' 'Medium' `
+                'Cloud protection significantly improves detection of new threats' `
+                'Enable in Windows Security > Virus protection > Manage settings'
+        }
+
+        # PUA (Potentially Unwanted App) Protection
+        if ($pref.PUAProtection -eq 1) {
+            Add-Finding 'Defender' 'PUA Protection' 'Enabled' 'Good' `
+                'Potentially Unwanted Application blocking is active'
+        } else {
+            Add-Finding 'Defender' 'PUA Protection' 'Disabled' 'Low' `
+                'PUA protection blocks adware, browser hijackers and bundled software' `
+                'Enable via PowerShell: Set-MpPreference -PUAProtection Enabled'
+        }
+
+        # Definition (signature) age
+        if ($status.AntivirusSignatureLastUpdated) {
+            $sigAge = (Get-Date) - $status.AntivirusSignatureLastUpdated
+            if ($sigAge.TotalDays -gt 7) {
+                Add-Finding 'Defender' 'Virus Definitions' "Outdated ($([int]$sigAge.TotalDays) days old)" 'High' `
+                    'Outdated definitions miss recently discovered malware' `
+                    'Update now: Windows Security > Virus protection > Check for updates'
+            } elseif ($sigAge.TotalDays -gt 3) {
+                Add-Finding 'Defender' 'Virus Definitions' "Aging ($([int]$sigAge.TotalDays) days old)" 'Medium' `
+                    'Definitions should update automatically every day'
+            } else {
+                Add-Finding 'Defender' 'Virus Definitions' "Current ($([int]$sigAge.TotalDays) days old)" 'Good' `
+                    "Definitions are up to date"
+            }
+        }
+
+        # Controlled Folder Access (ransomware protection)
+        if ($pref.EnableControlledFolderAccess -eq 1) {
+            Add-Finding 'Defender' 'Controlled Folder Access' 'Enabled' 'Good' `
+                'Built-in ransomware protection is guarding your documents and pictures'
+        } else {
+            Add-Finding 'Defender' 'Controlled Folder Access' 'Disabled' 'High' `
+                'Without this, ransomware can encrypt all your personal files' `
+                'Enable: Windows Security > Virus protection > Ransomware protection'
+        }
+
+        # Attack Surface Reduction rules
+        $asrIds     = $pref.AttackSurfaceReductionRules_Ids
+        $asrActions = $pref.AttackSurfaceReductionRules_Actions
+        if ($asrIds -and $asrIds.Count -gt 0) {
+            # Actions: 0=Off, 1=Block, 2=Audit, 6=Warn
+            $activeCount = @($asrActions | Where-Object { $_ -ne 0 }).Count
+            $risk = if ($activeCount -ge 5) { 'Good' } elseif ($activeCount -gt 0) { 'Low' } else { 'Medium' }
+            Add-Finding 'Defender' 'ASR Rules' "$activeCount/$($asrIds.Count) rules active" $risk `
+                'Attack Surface Reduction rules block common attack techniques'
+        } else {
+            Add-Finding 'Defender' 'ASR Rules' 'Not Configured' 'Medium' `
+                'ASR rules block Office macros, script exploits and LSASS credential theft' `
+                'Configure via Group Policy or: Set-MpPreference -AttackSurfaceReductionRules_Ids ... -AttackSurfaceReductionRules_Actions ...'
+        }
+
+        # Exploit Protection (DEP / ASLR via system-wide settings)
+        try {
+            $epXml = [xml](& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+                -Command "Get-ProcessMitigation -System | ConvertTo-Xml" 2>$null -ErrorAction SilentlyContinue)
+        } catch { $epXml = $null }
+
+        $depKey = Get-ItemProperty `
+            -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' `
+            -Name 'MoveImages' -ErrorAction SilentlyContinue
+        # A simple registry-based DEP check
+        $depBoot = (& bcdedit /enum 2>$null | Select-String 'nx').ToString() 2>$null
+        if ($depBoot -match 'AlwaysOn') {
+            Add-Finding 'Defender' 'DEP (Data Execution Prevention)' 'AlwaysOn' 'Good' `
+                'DEP prevents code from running in non-executable memory regions'
+        } else {
+            Add-Finding 'Defender' 'DEP (Data Execution Prevention)' 'Not AlwaysOn' 'Low' `
+                'DEP should be set to AlwaysOn for maximum protection' `
+                'Run as admin: bcdedit /set nx AlwaysOn'
+        }
+
+    } catch {
+        Add-Finding 'Defender' 'Advanced Analysis' 'Failed' 'Medium' `
+            "Could not complete advanced Defender check: $($_.Exception.Message)"
+    }
+}
+
+function Get-Windows11Features {
+    # This function only adds findings on Windows 11; silently skips on Windows 10
+    if (-not $script:IsWindows11) { return }
+
+    Write-ColorOutput "`n12. WINDOWS 11 SECURITY FEATURES" 'Header'
+    Write-ColorOutput "===================================" 'Header'
+
+    # ── Smart App Control (Windows 11 22H2+) ─────────────────────────────────
+    if ($script:IsWin1122H2Plus) {
+        try {
+            $sacKey = Get-ItemProperty `
+                -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' `
+                -ErrorAction SilentlyContinue
+            $sacState = switch ($sacKey.VerifiedAndReputablePolicyState) {
+                1       { @{ Status = 'On';         Risk = 'Good'   } }
+                2       { @{ Status = 'Evaluation'; Risk = 'Low'    } }
+                0       { @{ Status = 'Off';        Risk = 'Medium' } }
+                default { @{ Status = 'Unknown';    Risk = 'Info'   } }
+            }
+            Add-Finding 'Win11' 'Smart App Control' $sacState.Status $sacState.Risk `
+                'Blocks apps from untrusted sources – once turned off it cannot be re-enabled without a reset'
+        } catch {
+            Add-Finding 'Win11' 'Smart App Control' 'Check Failed' 'Low' `
+                "Could not determine Smart App Control status: $($_.Exception.Message)"
+        }
+    }
+
+    # ── Windows Hello ─────────────────────────────────────────────────────────
+    try {
+        $helloPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device'
+        if (Test-Path $helloPath) {
+            Add-Finding 'Win11' 'Windows Hello' 'Available' 'Good' `
+                'Passwordless/biometric sign-in is configured on this device'
+        } else {
+            Add-Finding 'Win11' 'Windows Hello' 'Not Configured' 'Low' `
+                'Windows Hello provides phishing-resistant sign-in without a password' `
+                'Set up: Settings > Accounts > Sign-in options'
+        }
+    } catch { }
+
+    # ── Windows Recall (Windows 11 24H2+) ────────────────────────────────────
+    if ($script:IsWin1124H2Plus) {
+        try {
+            $recallVal = (Get-ItemProperty `
+                -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI' `
+                -Name 'DisableAIDataAnalysis' -ErrorAction SilentlyContinue).DisableAIDataAnalysis
+            if ($recallVal -eq 1) {
+                Add-Finding 'Win11' 'Windows Recall' 'Disabled' 'Good' `
+                    'Recall is off – the system is not capturing periodic screenshots'
+            } else {
+                Add-Finding 'Win11' 'Windows Recall' 'May Be Active' 'Medium' `
+                    'Recall stores screenshots of your screen which may contain passwords or sensitive data' `
+                    'Review: Settings > Privacy & Security > Recall & snapshots'
+            }
+        } catch { }
+    }
+}
+
+function Get-PowerShellSecurity {
+    Write-ColorOutput "`n13. POWERSHELL SECURITY" 'Header'
+    Write-ColorOutput "=========================" 'Header'
+
+    # PS version info
+    Add-Finding 'PowerShell' 'Version' "$($PSVersionTable.PSVersion)" 'Info' `
+        "Running on PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition) edition)"
+
+    # Execution Policy
+    try {
+        $machinePolicy = Get-ExecutionPolicy -Scope LocalMachine -ErrorAction SilentlyContinue
+        $risk = switch ($machinePolicy) {
+            'Restricted'   { 'Good'     }
+            'AllSigned'    { 'Good'     }
+            'RemoteSigned' { 'Low'      }
+            'Unrestricted' { 'High'     }
+            'Bypass'       { 'Critical' }
+            default        { 'Medium'   }
+        }
+        $rec = if ($risk -in 'High','Critical') {
+            'Set policy: Set-ExecutionPolicy RemoteSigned -Scope LocalMachine'
+        } else { '' }
+        Add-Finding 'PowerShell' 'Execution Policy (Machine)' $machinePolicy $risk `
+            'Controls which PowerShell scripts are allowed to run on this computer' $rec
+    } catch {
+        Add-Finding 'PowerShell' 'Execution Policy' 'Check Failed' 'Medium' `
+            "Could not read execution policy: $($_.Exception.Message)"
+    }
+
+    # Script Block Logging
+    try {
+        $sbl = (Get-ItemProperty `
+            -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging' `
+            -Name 'EnableScriptBlockLogging' -ErrorAction SilentlyContinue).EnableScriptBlockLogging
+        if ($sbl -eq 1) {
+            Add-Finding 'PowerShell' 'Script Block Logging' 'Enabled' 'Good' `
+                'All PowerShell activity is recorded – attackers using PS are logged'
+        } else {
+            Add-Finding 'PowerShell' 'Script Block Logging' 'Disabled' 'Medium' `
+                'Without logging, malicious PowerShell scripts run invisibly' `
+                'Enable via Group Policy or registry: HKLM:\...\ScriptBlockLogging EnableScriptBlockLogging=1'
+        }
+    } catch {
+        Add-Finding 'PowerShell' 'Script Block Logging' 'Not Configured' 'Medium' `
+            'Script Block Logging policy key not found'
+    }
+
+    # Module Logging
+    try {
+        $ml = (Get-ItemProperty `
+            -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging' `
+            -Name 'EnableModuleLogging' -ErrorAction SilentlyContinue).EnableModuleLogging
+        if ($ml -eq 1) {
+            Add-Finding 'PowerShell' 'Module Logging' 'Enabled' 'Good' `
+                'PowerShell module usage is recorded in the event log'
+        } else {
+            Add-Finding 'PowerShell' 'Module Logging' 'Disabled' 'Low' `
+                'Module logging helps detect malicious use of PowerShell modules'
+        }
+    } catch { }
+
+    # Constrained Language Mode
+    try {
+        $langMode = $ExecutionContext.SessionState.LanguageMode
+        if ($langMode -eq 'ConstrainedLanguage') {
+            Add-Finding 'PowerShell' 'Language Mode' 'Constrained' 'Good' `
+                'Constrained Language Mode limits what PowerShell scripts can do'
+        } else {
+            Add-Finding 'PowerShell' 'Language Mode' $langMode 'Info' `
+                'Full Language Mode – PowerShell has no additional script restrictions'
+        }
+    } catch { }
+}
+
 function Show-Summary {
+    Write-Progress -Activity "Windows Attack Surface Analyzer" -Completed
+
     Write-ColorOutput "`n" 'Info'
-    Write-ColorOutput "================================" 'Header'
-    Write-ColorOutput "  SECURITY ANALYSIS SUMMARY" 'Header'
-    Write-ColorOutput "================================" 'Header'
-    
-    $criticalCount = ($SecurityFindings | Where-Object {$_.Risk -eq 'Critical'}).Count
-    $highCount = ($SecurityFindings | Where-Object {$_.Risk -eq 'High'}).Count
-    $mediumCount = ($SecurityFindings | Where-Object {$_.Risk -eq 'Medium'}).Count
-    $lowCount = ($SecurityFindings | Where-Object {$_.Risk -eq 'Low'}).Count
-    $goodCount = ($SecurityFindings | Where-Object {$_.Risk -eq 'Good'}).Count
-    
+    Write-ColorOutput "================================================" 'Header'
+    Write-ColorOutput "           SECURITY ANALYSIS SUMMARY           " 'Header'
+    Write-ColorOutput "================================================" 'Header'
+
+    $criticalCount = ($SecurityFindings | Where-Object { $_.Risk -eq 'Critical' }).Count
+    $highCount     = ($SecurityFindings | Where-Object { $_.Risk -eq 'High'     }).Count
+    $mediumCount   = ($SecurityFindings | Where-Object { $_.Risk -eq 'Medium'   }).Count
+    $lowCount      = ($SecurityFindings | Where-Object { $_.Risk -eq 'Low'      }).Count
+    $goodCount     = ($SecurityFindings | Where-Object { $_.Risk -eq 'Good'     }).Count
+
+    # Simple risk score: start at 100, deduct per issue
+    $riskScore = 100 - ($criticalCount * 15) - ($highCount * 8) - ($mediumCount * 3) - ($lowCount * 1)
+    $riskScore = [Math]::Max(0, $riskScore)
+    $scoreLabel = if ($riskScore -ge 80) { 'Good' } `
+                  elseif ($riskScore -ge 60) { 'Medium' } `
+                  elseif ($riskScore -ge 40) { 'High' } `
+                  else { 'Critical' }
+
+    Write-ColorOutput "System: $script:OSCaption (Build $script:WinBuild)" 'Info'
     Write-ColorOutput "Total Findings: $($SecurityFindings.Count)" 'Info'
-    if ($criticalCount -gt 0) { Write-ColorOutput "Critical Issues: $criticalCount" 'Critical' }
-    if ($highCount -gt 0) { Write-ColorOutput "High Risk Issues: $highCount" 'High' }
-    if ($mediumCount -gt 0) { Write-ColorOutput "Medium Risk Issues: $mediumCount" 'Medium' }
-    if ($lowCount -gt 0) { Write-ColorOutput "Low Risk Issues: $lowCount" 'Low' }
-    if ($goodCount -gt 0) { Write-ColorOutput "Good Security Settings: $goodCount" 'Good' }
-    
-    Write-ColorOutput "`nRECOMMENDATIONS:" 'Header'
-    if ($criticalCount -gt 0 -or $highCount -gt 0) {
-        Write-ColorOutput "Address critical and high-risk issues immediately!" 'Critical'
+    Write-ColorOutput "" 'Info'
+    if ($criticalCount -gt 0) { Write-ColorOutput "  Critical Issues : $criticalCount" 'Critical' }
+    if ($highCount     -gt 0) { Write-ColorOutput "  High Risk Issues: $highCount"     'High'     }
+    if ($mediumCount   -gt 0) { Write-ColorOutput "  Medium Issues   : $mediumCount"   'Medium'   }
+    if ($lowCount      -gt 0) { Write-ColorOutput "  Low Issues      : $lowCount"      'Low'      }
+    if ($goodCount     -gt 0) { Write-ColorOutput "  Good Settings   : $goodCount"     'Good'     }
+    Write-ColorOutput "" 'Info'
+    Write-ColorOutput "  Security Score  : $riskScore / 100" $scoreLabel
+
+    Write-ColorOutput "`nWHAT TO DO NEXT:" 'Header'
+    if ($criticalCount -gt 0) {
+        Write-ColorOutput "  [!!] Fix CRITICAL issues RIGHT NOW - your system is at serious risk!" 'Critical'
+    }
+    if ($highCount -gt 0) {
+        Write-ColorOutput "  [!]  Fix HIGH risk issues today or tomorrow." 'High'
     }
     if ($mediumCount -gt 0) {
-        Write-ColorOutput "Plan to address medium-risk issues within 30 days" 'Medium'
+        Write-ColorOutput "  [~]  Plan to address MEDIUM issues within 30 days." 'Medium'
     }
-    Write-ColorOutput "Run this analysis monthly to monitor your security posture" 'Info'
-    
+    if ($criticalCount -eq 0 -and $highCount -eq 0 -and $mediumCount -eq 0) {
+        Write-ColorOutput "  Great job! No critical, high, or medium issues found." 'Good'
+    }
+    Write-ColorOutput "  Run this scan monthly to stay on top of your security." 'Info'
+
     if ($Export) {
-        Write-ColorOutput "Detailed HTML report available at: $OutputPath" 'Info'
+        Write-ColorOutput "`n  Full report: $OutputPath" 'Good'
     } else {
-        Write-ColorOutput "Use -Export flag to generate a detailed HTML report" 'Info'
+        Write-ColorOutput "`n  Tip: Double-click Run-Analysis.bat for a full HTML report." 'Info'
     }
 }
 
 # Main execution
 function Main {
+    $osLabel = if ($script:IsWindows11) { "Windows 11" } `
+               elseif ($script:IsWindows10) { "Windows 10" } `
+               else { $script:OSCaption }
+    $psLabel = "PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
+
     Write-ColorOutput @"
-==============================================
-       Windows Attack Surface Analyzer    
-                                          
-  Comprehensive Security Assessment Tool  
-                                          
-  Author: NubleX / Igor Dunaev            
-  Version: 0.1.0                          
-==============================================
+================================================
+       Windows Attack Surface Analyzer
+       Comprehensive Security Assessment Tool
+
+  Author : NubleX / Igor Dunaev
+  Version: 0.2.0
+  System : $osLabel (Build $script:WinBuild, $script:OSArch)
+  Engine : $psLabel
+================================================
 "@ 'Header'
-    
-    Write-ColorOutput "`nStarting security analysis..." 'Info'
-    
+
     # Check admin rights
     if (-not (Test-AdminRights)) {
-        Write-ColorOutput "Warning: Running without administrator privileges. Some checks may be limited." 'Medium'
-        Write-ColorOutput "For complete analysis, run as Administrator." 'Info'
+        Write-ColorOutput "`n  [WARNING] Not running as Administrator." 'Medium'
+        Write-ColorOutput "  Some checks (BitLocker, TPM, user accounts) will be limited." 'Medium'
+        Write-ColorOutput "  For a complete scan, right-click PowerShell and choose 'Run as administrator'." 'Info'
+        Write-ColorOutput "  Or double-click Run-Analysis.bat which handles this automatically.`n" 'Info'
+    } else {
+        Write-ColorOutput "`n  [OK] Running as Administrator - full scan enabled.`n" 'Good'
     }
-    
-    # Run all security checks
+
+    # ── Run all security checks (with progress bar) ───────────────────────────
+    Write-ScanProgress "Network attack surface"
     Get-NetworkPorts
-    Get-ServicesSecurity  
+
+    Write-ScanProgress "Services security"
+    Get-ServicesSecurity
+
+    Write-ScanProgress "Windows Firewall"
     Get-FirewallStatus
+
+    Write-ScanProgress "Network shares"
     Get-NetworkShares
+
+    Write-ScanProgress "Windows optional features"
     Get-WindowsFeatures
+
+    Write-ScanProgress "Startup programs"
     Get-StartupPrograms
+
+    Write-ScanProgress "User account security"
     Get-UserSecurity
+
+    Write-ScanProgress "System security settings"
     Get-SystemSecurity
-    
-    # Export results if requested
+
+    Write-ScanProgress "Hardware security (TPM / Secure Boot / VBS)"
+    Get-HardwareSecurity
+
+    Write-ScanProgress "Disk encryption (BitLocker)"
+    Get-BitLockerStatus
+
+    Write-ScanProgress "Advanced Defender analysis"
+    Get-AdvancedDefender
+
+    Write-ScanProgress "Windows 11 specific features"
+    Get-Windows11Features
+
+    Write-ScanProgress "PowerShell security"
+    Get-PowerShellSecurity
+
+    # ── Export and summarise ──────────────────────────────────────────────────
     Export-Results
-    
-    # Show summary
     Show-Summary
-    
-    Write-ColorOutput "Analysis complete!" 'Good'
+
+    Write-ColorOutput "`n  Analysis complete!" 'Good'
 }
 
 # Execute main function
