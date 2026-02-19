@@ -3,7 +3,7 @@
 # Created by NubleX / Igor Dunaev, 2025
 #
 # Authors: Security Community
-# Version: 0.3.0
+# Version: 0.4.0
 # License: MIT
 # GitHub: https://github.com/NubleX/Windows-Attack-Surface-Analyzer
 #
@@ -17,9 +17,13 @@
 # Works with PowerShell 5.1 and PowerShell 7+.
 
 param(
-    [switch]$Detailed,  # Show detailed output
-    [switch]$Export,    # Export results to file
-    [string]$OutputPath = ".\SecurityReport.html"
+    [switch]$Detailed,              # Show detailed output
+    [switch]$Export,                # Export HTML report
+    [string]$OutputPath = ".\SecurityReport.html",
+    [switch]$ExportJson,            # Export JSON report (for SIEM / automation)
+    [string]$JsonPath   = ".\SecurityReport.json",
+    [switch]$ExportCsv,             # Export CSV report (for spreadsheet analysis)
+    [string]$CsvPath    = ".\SecurityReport.csv"
 )
 
 # ── Detect OS version and PowerShell version ──────────────────────────────────
@@ -42,7 +46,7 @@ $script:IsWindows10     = ($script:WinBuild -ge 10240) -and (-not $script:IsWind
 
 # ── Scan progress tracking ────────────────────────────────────────────────────
 $script:ScanStep  = 0
-$script:ScanTotal = 21
+$script:ScanTotal = 23
 function Write-ScanProgress {
     param([string]$Section)
     $script:ScanStep++
@@ -518,6 +522,26 @@ function Export-Results {
         try { Start-Process $OutputPath } catch { }
     } catch {
         Write-ColorOutput "Failed to export report: $($_.Exception.Message)" 'Critical'
+    }
+
+    # ── JSON export ───────────────────────────────────────────────────────────
+    if ($ExportJson) {
+        try {
+            $SecurityFindings | ConvertTo-Json -Depth 4 | Out-File -FilePath $JsonPath -Encoding UTF8
+            Write-ColorOutput "JSON report saved to: $JsonPath" 'Good'
+        } catch {
+            Write-ColorOutput "Failed to export JSON: $($_.Exception.Message)" 'Critical'
+        }
+    }
+
+    # ── CSV export ────────────────────────────────────────────────────────────
+    if ($ExportCsv) {
+        try {
+            $SecurityFindings | Export-Csv -Path $CsvPath -NoTypeInformation -Encoding UTF8
+            Write-ColorOutput "CSV report saved to: $CsvPath" 'Good'
+        } catch {
+            Write-ColorOutput "Failed to export CSV: $($_.Exception.Message)" 'Critical'
+        }
     }
 }
 
@@ -1549,6 +1573,197 @@ function Get-AuthenticationSecurity {
     }
 }
 
+function Get-SystemHardening {
+    Write-ColorOutput "`n22. SYSTEM HARDENING (DRIVERS / HOSTS FILE)" 'Header'
+    Write-ColorOutput "=============================================" 'Header'
+
+    # ── Driver signature enforcement ──────────────────────────────────────────
+    try {
+        $bcdedit = & bcdedit /enum 2>&1
+        $testSigning   = ($bcdedit | Select-String 'testsigning\s+Yes'          -Quiet)
+        $noIntegrity   = ($bcdedit | Select-String 'nointegritychecks\s+Yes'    -Quiet)
+
+        if ($testSigning) {
+            Add-Finding 'Drivers' 'Test Signing Mode' 'Enabled' 'High' `
+                'Test signing allows unsigned drivers to load -- enables rootkits and malicious drivers' `
+                'Disable: bcdedit /set testsigning off  (requires admin, then reboot)'
+        } else {
+            Add-Finding 'Drivers' 'Test Signing Mode' 'Disabled' 'Good' `
+                'Only signed drivers are permitted to load'
+        }
+
+        if ($noIntegrity) {
+            Add-Finding 'Drivers' 'Integrity Checks' 'Disabled' 'Critical' `
+                'Driver integrity checks are off -- the system will load any driver regardless of signature' `
+                'Re-enable: bcdedit /set nointegritychecks off  (requires admin, then reboot)'
+        } else {
+            Add-Finding 'Drivers' 'Integrity Checks' 'Enabled' 'Good' `
+                'Driver integrity checks are enforced at boot'
+        }
+    } catch {
+        Add-Finding 'Drivers' 'Signature Enforcement' 'Check Failed' 'Medium' `
+            "Could not read BCD boot configuration: $($_.Exception.Message)"
+    }
+
+    # ── Known vulnerable driver filenames ────────────────────────────────────
+    # Small curated list of drivers with publicly known exploitable vulnerabilities
+    $knownBadDrivers = @(
+        'dbutil_2_3.sys',   # Dell BIOS update -- CVE-2021-21551
+        'capcom.sys',       # Capcom Street Fighter -- arbitrary kernel code exec
+        'rtcore64.sys',     # MSI Afterburner -- CVE-2019-16098
+        'aswarpot.sys',     # Avast driver -- privilege escalation
+        'gdrv.sys',         # GIGABYTE -- CVE-2018-19320
+        'iqvw64e.sys',      # Intel Network Adapter -- CVE-2015-2291
+        'nvidmkms.sys',     # NVIDIA -- older exploit target
+        'physmem.sys'       # Physical memory access driver
+    )
+    $driversPath = "$env:SystemRoot\System32\drivers"
+    $foundBad    = $false
+    foreach ($driverFile in $knownBadDrivers) {
+        if (Test-Path (Join-Path $driversPath $driverFile)) {
+            Add-Finding 'Drivers' $driverFile 'Found' 'Critical' `
+                "Known vulnerable driver present: $driverFile" `
+                'Remove or update immediately -- this driver can be exploited for privilege escalation'
+            $foundBad = $true
+        }
+    }
+    if (-not $foundBad) {
+        Add-Finding 'Drivers' 'Known Vulnerable Drivers' 'None found' 'Good' `
+            'No known vulnerable drivers detected in System32\drivers'
+    }
+
+    # ── Hosts file tampering ──────────────────────────────────────────────────
+    try {
+        $hostsPath = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
+        $hostsLines = Get-Content $hostsPath -ErrorAction Stop
+
+        # Active entries = non-blank, non-comment lines
+        $activeEntries = $hostsLines | Where-Object { $_ -notmatch '^\s*#' -and $_ -match '\S' }
+
+        # Strip well-known defaults
+        $defaults = @(
+            '127.0.0.1\s+localhost',
+            '::1\s+localhost',
+            '127.0.0.1\s+ip6-localhost',
+            'ff02::\S+\s+ip6-\S+'
+        )
+        $suspicious = $activeEntries | Where-Object {
+            $line = $_
+            -not ($defaults | Where-Object { $line -match $_ })
+        }
+
+        if ($suspicious) {
+            foreach ($entry in $suspicious) {
+                Add-Finding 'System' 'Hosts File Entry' $entry.Trim() 'Medium' `
+                    'Non-default hosts file entry -- could redirect legitimate domains to malicious IPs' `
+                    "Review $hostsPath and remove any entries you did not add intentionally"
+            }
+        } else {
+            Add-Finding 'System' 'Hosts File' 'Clean (default entries only)' 'Good' `
+                'No unexpected entries in the hosts file'
+        }
+    } catch {
+        Add-Finding 'System' 'Hosts File' 'Check Failed' 'Low' `
+            "Could not read hosts file: $($_.Exception.Message)"
+    }
+
+    # ── Password history via secedit ──────────────────────────────────────────
+    try {
+        $tmpCfg = Join-Path $env:TEMP "secpol_$([System.IO.Path]::GetRandomFileName()).cfg"
+        $null   = & secedit /export /cfg $tmpCfg /quiet 2>&1
+        if (Test-Path $tmpCfg) {
+            $secContent = Get-Content $tmpCfg -Raw -ErrorAction SilentlyContinue
+            Remove-Item $tmpCfg -Force -ErrorAction SilentlyContinue
+            if ($secContent -match 'PasswordHistorySize\s*=\s*(\d+)') {
+                $histSize = [int]$Matches[1]
+                if ($histSize -ge 10) {
+                    Add-Finding 'Authentication' 'Password History' "$histSize passwords remembered" 'Good' `
+                        'Users cannot reuse their last several passwords'
+                } elseif ($histSize -gt 0) {
+                    Add-Finding 'Authentication' 'Password History' "$histSize passwords remembered" 'Low' `
+                        'Consider increasing password history to at least 10'
+                } else {
+                    Add-Finding 'Authentication' 'Password History' 'Not enforced' 'Medium' `
+                        'Users can reuse the same password indefinitely' `
+                        'Set via: Local Security Policy > Account Policies > Password History'
+                }
+            }
+        }
+    } catch { }
+}
+
+function Get-ScheduledTasksSecurity {
+    Write-ColorOutput "`n23. SCHEDULED TASKS SECURITY" 'Header'
+    Write-ColorOutput "==============================" 'Header'
+
+    try {
+        $allTasks = Get-ScheduledTask -ErrorAction SilentlyContinue
+
+        if (-not $allTasks) {
+            Add-Finding 'ScheduledTasks' 'Analysis' 'Unavailable' 'Info' `
+                'Could not enumerate scheduled tasks (may require elevated privileges)'
+            return
+        }
+
+        # Non-Microsoft tasks only -- these are the ones users/software add
+        $nonMsTasks = $allTasks | Where-Object {
+            $_.TaskPath -notlike '\Microsoft\*' -and
+            $_.TaskPath -notlike '\MicrosoftOffice\*'
+        }
+
+        $totalNonMs = $nonMsTasks.Count
+        $risk = if ($totalNonMs -gt 20) { 'Medium' } elseif ($totalNonMs -gt 10) { 'Low' } else { 'Info' }
+        Add-Finding 'ScheduledTasks' 'Non-Microsoft Tasks' "$totalNonMs task(s)" $risk `
+            'Third-party scheduled tasks -- review for unwanted persistence'
+
+        # Tasks running as SYSTEM or with highest privileges outside Microsoft paths
+        $elevatedTasks = $nonMsTasks | Where-Object {
+            $p = $_.Principal
+            ($p.UserId -match 'SYSTEM|S-1-5-18|NETWORK SERVICE|S-1-5-20') -or
+            ($p.RunLevel -eq 'Highest')
+        }
+
+        if ($elevatedTasks.Count -gt 0) {
+            foreach ($task in $elevatedTasks) {
+                $action  = ($task.Actions | Select-Object -First 1)
+                $execute = if ($action.Execute) { $action.Execute } else { 'Unknown' }
+                Add-Finding 'ScheduledTasks' $task.TaskName `
+                    "Runs as: $($task.Principal.UserId) | Action: $execute" 'Medium' `
+                    "Non-Microsoft task running with elevated privileges in: $($task.TaskPath)" `
+                    'Verify this task is intentional and the executable path is legitimate'
+            }
+        } else {
+            Add-Finding 'ScheduledTasks' 'Elevated Non-Microsoft Tasks' 'None found' 'Good' `
+                'No third-party tasks running as SYSTEM or with highest privileges'
+        }
+
+        # Tasks pointing to suspicious locations (temp, appdata, user writable paths)
+        $suspiciousPaths = $nonMsTasks | Where-Object {
+            $action = ($_.Actions | Select-Object -First 1)
+            $exe    = if ($action.Execute) { $action.Execute } else { '' }
+            $exe -match '\\Temp\\|\\AppData\\Local\\Temp\\|\\Users\\Public\\' -and
+            $exe -notmatch '\\Windows\\Temp\\'
+        }
+
+        if ($suspiciousPaths.Count -gt 0) {
+            foreach ($task in $suspiciousPaths) {
+                $exe = ($task.Actions | Select-Object -First 1).Execute
+                Add-Finding 'ScheduledTasks' $task.TaskName `
+                    "Executable: $exe" 'High' `
+                    'Task executes from a user-writable temp/public path -- common malware persistence technique' `
+                    'Investigate and remove if not intentional'
+            }
+        } else {
+            Add-Finding 'ScheduledTasks' 'Suspicious Executable Paths' 'None found' 'Good' `
+                'No tasks found executing from temp or public directories'
+        }
+
+    } catch {
+        Add-Finding 'ScheduledTasks' 'Analysis' 'Failed' 'Medium' `
+            "Could not analyse scheduled tasks: $($_.Exception.Message)"
+    }
+}
+
 function Show-Summary {
     Write-Progress -Activity "Windows Attack Surface Analyzer" -Completed
 
@@ -1617,7 +1832,7 @@ function Main {
        Comprehensive Security Assessment Tool
 
   Author : NubleX / Igor Dunaev
-  Version: 0.3.0
+  Version: 0.4.0
   System : $osLabel (Build $script:WinBuild, $script:OSArch)
   Engine : $psLabel
 ================================================
@@ -1696,6 +1911,12 @@ function Main {
 
     Write-ScanProgress "Authentication and account policy"
     Get-AuthenticationSecurity
+
+    Write-ScanProgress "System hardening (drivers / hosts file)"
+    Get-SystemHardening
+
+    Write-ScanProgress "Scheduled tasks security"
+    Get-ScheduledTasksSecurity
 
     # ── Export and summarise ──────────────────────────────────────────────────
     Export-Results

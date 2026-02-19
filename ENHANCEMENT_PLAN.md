@@ -142,18 +142,22 @@ This plan tracks enhancements to make the Windows Attack Surface Analyzer more c
 
 ---
 
-## v0.4.0
+## v0.4.0 — COMPLETED
 
-### Phase 7: System Hardening
-- [ ] Unsigned driver detection
-- [ ] Hosts file modification check
-- [ ] Non-Microsoft scheduled tasks (potential persistence)
-- [ ] Scheduled tasks running as SYSTEM
+### Phase 7: System Hardening - DONE
+- [x] Driver signature enforcement (test signing mode, integrity checks via bcdedit)
+- [x] Known vulnerable driver detection (8 named drivers with CVE references)
+- [x] Hosts file tampering check (non-default entries flagged)
+- [x] Password history enforcement via secedit /export
+- [x] Non-Microsoft scheduled tasks count
+- [x] Scheduled tasks running as SYSTEM or with highest privileges
+- [x] Scheduled tasks with executables in temp/public paths (persistence indicator)
+- [ ] RDP session timeout (deferred to v1.0.0)
 
-### Phase 8: Reporting
-- [ ] JSON export format (for SIEM / automation)
-- [ ] CSV export format
-- [ ] Scan comparison / diff mode (run vs previous baseline)
+### Phase 8: Reporting - DONE
+- [x] JSON export format (-ExportJson, -JsonPath)
+- [x] CSV export format (-ExportCsv, -CsvPath)
+- [ ] Scan comparison / diff mode (deferred to v1.0.0)
 
 ---
 
@@ -178,5 +182,5 @@ This plan tracks enhancements to make the Windows Attack Surface Analyzer more c
 | 0.1.0 | Initial release -- 8 core checks | Released |
 | 0.2.0 | Hardware security, Defender deep-dive, Win11 features, UX launcher | Released |
 | 0.3.0 | ASR details, exploit protection, privacy, network, remote access, WSL, apps, auth, CI | Released |
-| 0.4.0 | System hardening (drivers, hosts, scheduled tasks), JSON/CSV export | Planned |
+| 0.4.0 | System hardening (drivers, hosts, scheduled tasks), JSON/CSV export | Released |
 | 1.0.0 | Performance (parallel scans, quick mode), CIS baseline comparison, full test suite | Planned |
