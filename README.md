@@ -3,14 +3,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://docs.microsoft.com/en-us/powershell/)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-blue.svg)](https://www.microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-0.3.0-brightgreen.svg)](https://github.com/NubleX/Windows-Attack-Surface-Analyzer)
+[![Version](https://img.shields.io/badge/Version-0.4.0-brightgreen.svg)](https://github.com/NubleX/Windows-Attack-Surface-Analyzer)
 [![CI](https://github.com/NubleX/Windows-Attack-Surface-Analyzer/actions/workflows/test.yml/badge.svg)](https://github.com/NubleX/Windows-Attack-Surface-Analyzer/actions/workflows/test.yml)
 
 A comprehensive, open-source PowerShell tool for analyzing Windows security posture and identifying potential attack vectors. Works on Windows 10 and all versions of Windows 11. No installation required.
 
 ## What it Does
 
-The Windows Attack Surface Analyzer performs a thorough security assessment of your Windows system across 21 categories:
+The Windows Attack Surface Analyzer performs a thorough security assessment of your Windows system across 23 categories:
 
 - **Network Attack Surface** - Open ports, listening services, and network exposure
 - **Service Security** - Risky or unnecessary Windows services
@@ -33,6 +33,8 @@ The Windows Attack Surface Analyzer performs a thorough security assessment of y
 - **WSL Security** - WSL version, installed distributions, network mode (NAT vs mirrored)
 - **Application Security** - Edge SmartScreen/Enhanced Security, Adobe, Java, Chrome, Firefox version reporting
 - **Authentication Policy** - Autologon, cached credentials, account lockout threshold, password length and expiry
+- **System Hardening** - Driver signature enforcement, known vulnerable drivers, hosts file tampering, password history
+- **Scheduled Tasks** - Non-Microsoft tasks, tasks running as SYSTEM/elevated, executables in suspicious paths
 
 ## Quick Start
 
@@ -130,6 +132,10 @@ WHAT TO DO NEXT:
 | `-Detailed` | Show verbose descriptions for each finding | `.\script.ps1 -Detailed` |
 | `-Export` | Generate HTML report (auto-opens in browser) | `.\script.ps1 -Export` |
 | `-OutputPath` | Custom report save location | `.\script.ps1 -Export -OutputPath "C:\Reports\scan.html"` |
+| `-ExportJson` | Generate JSON report (SIEM / automation) | `.\script.ps1 -ExportJson` |
+| `-JsonPath` | Custom JSON save location | `.\script.ps1 -ExportJson -JsonPath "C:\Reports\scan.json"` |
+| `-ExportCsv` | Generate CSV report (spreadsheet analysis) | `.\script.ps1 -ExportCsv` |
+| `-CsvPath` | Custom CSV save location | `.\script.ps1 -ExportCsv -CsvPath "C:\Reports\scan.csv"` |
 
 ## Security Categories
 
