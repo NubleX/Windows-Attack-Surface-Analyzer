@@ -201,8 +201,10 @@ function Get-ServicesSecurity {
         }
     }
     
-    # Check for unusual running services
-    $runningServices = Get-Service | Where-Object {$_.Status -eq 'Running'}
+    # Check for unusual running services (some protected services throw on status query)
+    $runningServices = Get-Service -ErrorAction SilentlyContinue | Where-Object {
+        try { $_.Status -eq 'Running' } catch { $false }
+    }
     $serviceCount = $runningServices.Count
     $risk = if ($serviceCount -gt 150) { "Medium" } elseif ($serviceCount -gt 100) { "Low" } else { "Info" }
     Add-Finding "Services" "Total Running Services" "$serviceCount services" $risk "High service count may indicate unnecessary attack surface"
