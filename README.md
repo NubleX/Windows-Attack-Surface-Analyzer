@@ -3,14 +3,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://docs.microsoft.com/en-us/powershell/)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-blue.svg)](https://www.microsoft.com/windows)
+[![Version](https://img.shields.io/badge/Version-0.2.0-brightgreen.svg)](https://github.com/NubleX/Windows-Attack-Surface-Analyzer)
 
-A comprehensive, open-source PowerShell tool for analyzing Windows security posture and identifying potential attack vectors. Perfect for cybersecurity professionals, system administrators, and security-conscious users.
+A comprehensive, open-source PowerShell tool for analyzing Windows security posture and identifying potential attack vectors. Works on Windows 10 and all versions of Windows 11. No installation required.
 
 ## What it Does
 
-The Windows Attack Surface Analyzer performs a thorough security assessment of your Windows system, identifying:
+The Windows Attack Surface Analyzer performs a thorough security assessment of your Windows system across 13 categories:
 
-- **Network Attack Vectors** - Open ports, listening services, and network exposure
+- **Network Attack Surface** - Open ports, listening services, and network exposure
 - **Service Security** - Risky or unnecessary Windows services
 - **Firewall Configuration** - Windows Firewall status and rule analysis
 - **Network Shares** - SMB shares and file system exposure
@@ -18,281 +19,281 @@ The Windows Attack Surface Analyzer performs a thorough security assessment of y
 - **Startup Security** - Programs with system startup access
 - **User Account Security** - Account policies and configurations
 - **System Hardening** - Windows Defender, UAC, and update status
+- **Hardware Security** - TPM, Secure Boot, VBS, Memory Integrity, Credential Guard, Kernel DMA Protection
+- **Disk Encryption** - BitLocker status per drive with protector type
+- **Advanced Defender** - Tamper Protection, Cloud Protection, ASR rules, Controlled Folder Access, definition age, DEP
+- **Windows 11 Features** - Smart App Control, Windows Hello, Windows Recall (version-gated, skips gracefully on Win10)
+- **PowerShell Security** - Execution policy, Script Block Logging, Module Logging, Language Mode
 
 ## Quick Start
 
+### Option 1: Double-Click (Recommended for most users)
+
+1. Download both files to the same folder:
+   - `WindowsAttackSurfaceAnalyzer.ps1`
+   - `Run-Analysis.bat`
+
+2. Double-click `Run-Analysis.bat`
+
+That is all. The launcher handles administrator elevation automatically, selects the best available PowerShell version (7 preferred, 5.1 fallback), runs the full scan, and opens the HTML report in your browser when done.
+
+### Option 2: PowerShell Command Line
+
+```powershell
+# Basic scan (console output only)
+.\WindowsAttackSurfaceAnalyzer.ps1
+
+# Full scan with HTML report
+.\WindowsAttackSurfaceAnalyzer.ps1 -Export
+
+# Verbose output with HTML report at custom path
+.\WindowsAttackSurfaceAnalyzer.ps1 -Detailed -Export -OutputPath "C:\Reports\security.html"
+```
+
 ### Prerequisites
-- Windows 10/11 or Windows Server 2016+
-- PowerShell 5.1 or later
-- Administrator privileges (recommended for complete analysis)
 
-### Basic Usage
-
-1. **Download the script:**
-   ```powershell
-   Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NubleX/Windows-Attack-Surface-Analyzer/main/WindowsAttackSurfaceAnalyzer.ps1" -OutFile "WindowsAttackSurfaceAnalyzer.ps1"
-   ```
-
-2. **Run the analysis:**
-   ```powershell
-   # Basic scan
-   .\WindowsAttackSurfaceAnalyzer.ps1
-   
-   # Detailed output with HTML report
-   .\WindowsAttackSurfaceAnalyzer.ps1 -Detailed -Export
-   ```
-
-3. **Review results:**
-   - Console output shows real-time findings
-   - HTML report provides comprehensive documentation
-   - Color-coded risk levels guide prioritization
+- Windows 10 or Windows 11 (all versions)
+- PowerShell 5.1 or PowerShell 7+ (auto-detected by the launcher)
+- Administrator privileges recommended for complete analysis
 
 ## Sample Output
 
 ```
-╔══════════════════════════════════════════╗
-║       Windows Attack Surface Analyzer    ║
-║                                          ║
-║  Comprehensive Security Assessment Tool  ║
-╚══════════════════════════════════════════╝
+================================================
+       Windows Attack Surface Analyzer
+       Comprehensive Security Assessment Tool
 
-1. NETWORK ATTACK SURFACE
-================================
-  [Medium] Total Listening Ports - 12 ports open
-  [High] Port 3389 - Listening (RDP Service)
-  [Medium] Port 445 - Listening (SMB Server)
-  [Low] Port 135 - Listening (RPC Endpoint Mapper)
+  Author : NubleX / Igor Dunaev
+  Version: 0.2.0
+  System : Windows 11 Pro (Build 22631, 64-bit)
+  Engine : PowerShell 7.4.1 (Core edition)
+================================================
 
-2. SERVICES SECURITY ANALYSIS
+  [OK] Running as Administrator - full scan enabled.
+
+9. HARDWARE SECURITY (TPM / SECURE BOOT / VBS)
+================================================
+  [Good]   TPM - Enabled (v2.0)
+  [Good]   Secure Boot - Enabled
+  [Medium] Virtualization-Based Security (VBS) - Not Running
+  [Medium] Memory Integrity (HVCI) - Disabled
+  [Low]    Credential Guard - Not Running
+
+10. DISK ENCRYPTION (BITLOCKER)
 =================================
-  [High] upnphost - Running (UPnP Device Host)
-  [Medium] SSDPSRV - Running (UPnP Discovery)
-  [Good] sshd - Not Found/Removed
+  [Good]   Drive C:\ - Encrypted (100%)
+  [High]   Drive D:\ - Not Encrypted
 
+11. ADVANCED DEFENDER ANALYSIS
 ================================
-  SECURITY ANALYSIS SUMMARY
-================================
-Total Findings: 47
-Critical Issues: 0
-High Risk Issues: 3
-Medium Risk Issues: 12
-Low Risk Issues: 8
-Good Security Settings: 24
+  [Good]   Tamper Protection - Enabled
+  [Good]   Cloud Protection - Enabled
+  [Good]   Virus Definitions - Current (0 days old)
+  [High]   Controlled Folder Access - Disabled
+  [Medium] ASR Rules - Not Configured
 
-RECOMMENDATIONS:
-Address critical and high-risk issues immediately!
-Plan to address medium-risk issues within 30 days
-Run this analysis monthly to monitor your security posture
+================================================
+           SECURITY ANALYSIS SUMMARY
+================================================
+System: Windows 11 Pro (Build 22631)
+Total Findings: 61
+
+  Critical Issues : 0
+  High Risk Issues: 5
+  Medium Issues   : 14
+  Low Issues      : 9
+  Good Settings   : 33
+
+  Security Score  : 67 / 100
+
+WHAT TO DO NEXT:
+  [!]  Fix HIGH risk issues today or tomorrow.
+  [~]  Plan to address MEDIUM issues within 30 days.
+  Run this scan monthly to stay on top of your security.
+
+  Full report: .\SecurityReport.html
 ```
 
 ## Command Line Options
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
-| `-Detailed` | Show verbose output with descriptions | `.\script.ps1 -Detailed` |
-| `-Export` | Generate HTML report | `.\script.ps1 -Export` |
-| `-OutputPath` | Custom report location | `.\script.ps1 -Export -OutputPath "C:\Reports\security.html"` |
+| `-Detailed` | Show verbose descriptions for each finding | `.\script.ps1 -Detailed` |
+| `-Export` | Generate HTML report (auto-opens in browser) | `.\script.ps1 -Export` |
+| `-OutputPath` | Custom report save location | `.\script.ps1 -Export -OutputPath "C:\Reports\scan.html"` |
 
 ## Security Categories
 
 ### Network Attack Surface
-- **TCP/UDP Listening Ports** - Identifies all open network ports
-- **Process Association** - Maps ports to running processes
-- **Risk Assessment** - Categorizes ports by security risk level
-- **Protocol Analysis** - Identifies dangerous protocols (Telnet, FTP, etc.)
+- TCP listening ports with process identification
+- Risk scoring by port number (Telnet, FTP, RDP, SMB etc.)
+- Total port count assessment
 
 ### Service Security
-- **Critical Services** - SSH, Web servers, Remote access
-- **UPnP Services** - Universal Plug and Play risks
-- **Legacy Protocols** - Telnet, FTP, and other insecure services
-- **Startup Configuration** - Service auto-start settings
+- High-risk services: SSH, IIS, UPnP, Telnet, FTP, Remote Registry, RDP, SMB
+- Startup type (automatic vs manual vs disabled)
+- Total running service count
 
 ### Firewall Analysis
-- **Profile Status** - Domain, Private, Public firewall states
-- **Rule Analysis** - Inbound/outbound rule assessment
-- **Exception Counting** - Quantifies firewall allow rules
-- **Default Policies** - Checks restrictive default configurations
+- Domain, Private, and Public profile status
+- Default inbound/outbound action
+- Inbound allow rule count
 
-### File System Security
-- **SMB Shares** - Network file sharing exposure
-- **Administrative Shares** - Hidden C$, ADMIN$ share analysis
-- **Share Permissions** - Access control assessment
+### Network Shares
+- All SMB shares including administrative shares (C$, ADMIN$, IPC$)
+- Share paths and descriptions
+
+### Windows Optional Features
+- SMB1 (critical ransomware risk)
+- Telnet client/server, TFTP, IIS, WSL, Simple TCP/IP services
+
+### Startup Programs
+- HKLM and HKCU Run and RunOnce registry keys
+- Total startup item count
+
+### User Account Security
+- Guest account status
+- Password age (flags accounts older than 90 days)
+- Administrator group member count
+- Accounts with no password set
 
 ### System Hardening
-- **Windows Defender** - Antivirus and real-time protection
-- **User Account Control** - UAC privilege escalation protection
-- **Windows Updates** - Patch level and update recency
-- **Account Security** - Guest accounts, password policies
+- Windows Update recency
+- Windows Defender real-time protection and service status
+- UAC (User Account Control) status
+
+### Hardware Security
+- TPM version and enabled state
+- Secure Boot (UEFI) vs Legacy BIOS
+- Virtualization-Based Security (VBS) running state
+- Memory Integrity / HVCI (Hypervisor-Protected Code Integrity)
+- Credential Guard
+- Kernel DMA Protection
+
+### Disk Encryption
+- BitLocker status and encryption percentage per drive
+- Protector types in use (TPM, PIN, USB recovery key)
+
+### Advanced Defender Analysis
+- Tamper Protection (prevents attackers disabling Defender)
+- Cloud-delivered protection
+- Potentially Unwanted Application (PUA) blocking
+- Virus definition age
+- Controlled Folder Access (ransomware protection)
+- Attack Surface Reduction (ASR) rule count
+- DEP (Data Execution Prevention) mode
+
+### Windows 11 Security Features
+- Smart App Control status: On / Evaluation / Off (22H2 and later)
+- Windows Hello passwordless sign-in configuration
+- Windows Recall status (24H2 and later)
+- All checks silently skip on Windows 10
+
+### PowerShell Security
+- Execution policy (machine scope)
+- Script Block Logging
+- Module Logging
+- Constrained Language Mode
 
 ## Risk Assessment Framework
 
-The tool uses a standardized risk classification system:
-
-| Risk Level | Color | Criteria | Response Time |
-|------------|-------|----------|---------------|
-| **Critical** | 🔴 Red | Immediate security threat | Fix immediately |
-| **High** | 🟣 Magenta | Significant vulnerability | Fix within 24-48 hours |
-| **Medium** | 🟡 Yellow | Moderate security concern | Fix within 30 days |
-| **Low** | 🔵 Cyan | Minor security issue | Monitor and plan |
-| **Good** | 🟢 Green | Proper security configuration | Maintain |
+| Risk Level | Console Color | Criteria | Recommended Response |
+|------------|---------------|----------|----------------------|
+| Critical | Red | Immediate security threat | Fix right away |
+| High | Magenta | Significant vulnerability | Fix within 24-48 hours |
+| Medium | Yellow | Moderate security concern | Fix within 30 days |
+| Low | Cyan | Minor security issue | Monitor and plan |
+| Good | Green | Proper security configuration | Maintain |
+| Info | White | Informational finding | No action needed |
 
 ## Use Cases
 
+### For Home Users
+- Double-click `Run-Analysis.bat` and review the HTML report
+- Follow the "What to do next" guidance in the summary
+- Run monthly to track improvements
+
 ### For Cybersecurity Professionals
-- **Penetration Testing** - Initial reconnaissance and attack surface mapping
-- **Security Audits** - Compliance and security posture assessment
-- **Incident Response** - Rapid security baseline establishment
-- **Client Assessments** - Professional security consulting
+- Initial reconnaissance and attack surface mapping
+- Security audits and compliance posture assessment
+- Incident response baseline establishment
+- Client security assessments
 
 ### For System Administrators
-- **Security Hardening** - Identify misconfigurations and unnecessary services
-- **Compliance Reporting** - Generate documentation for audits
-- **Change Management** - Monitor security impact of system changes
-- **Baseline Security** - Establish and maintain security standards
+- Identify misconfigurations and unnecessary services
+- Generate documentation for compliance audits
+- Monitor security impact of system changes
+- Establish and maintain security baselines
 
-### For Home Users
-- **Personal Security** - Assess home computer security
-- **Privacy Protection** - Identify potential data exposure points
-- **Performance Optimization** - Remove unnecessary startup programs
-- **Education** - Learn about Windows security concepts
+## Automation
 
-## Advanced Features
-
-### HTML Report Generation
-- **Professional Formatting** - Clean, printable security reports
-- **Executive Summary** - High-level findings overview
-- **Detailed Tables** - Complete finding documentation
-- **Risk Prioritization** - Color-coded urgency indicators
-- **Recommendations** - Specific remediation guidance
-
-### Automation Support
 ```powershell
-# Scheduled security scanning
-$TaskAction = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-File C:\Scripts\WindowsAttackSurfaceAnalyzer.ps1 -Export -OutputPath C:\Reports\Weekly-$(Get-Date -Format 'yyyy-MM-dd').html"
-$TaskTrigger = New-ScheduledTaskTrigger -Weekly -At "02:00AM" -DaysOfWeek Sunday
-Register-ScheduledTask -TaskName "Weekly Security Scan" -Action $TaskAction -Trigger $TaskTrigger
-```
+# Scheduled weekly scan
+$action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"C:\Scripts\Run-Analysis.bat`""
+$trigger = New-ScheduledTaskTrigger -Weekly -At "02:00AM" -DaysOfWeek Sunday
+Register-ScheduledTask -TaskName "Weekly Security Scan" -Action $action -Trigger $trigger -RunLevel Highest
 
-### Integration Examples
-```powershell
-# PowerShell remoting for multiple machines
+# PowerShell remoting across multiple machines
 $computers = "Server1", "Server2", "Workstation1"
-Invoke-Command -ComputerName $computers -FilePath ".\WindowsAttackSurfaceAnalyzer.ps1"
+Invoke-Command -ComputerName $computers -FilePath ".\WindowsAttackSurfaceAnalyzer.ps1" -ArgumentList "-Export"
 
-# Export to centralized logging
+# Centralized report storage
 .\WindowsAttackSurfaceAnalyzer.ps1 -Export -OutputPath "\\FileServer\SecurityReports\$env:COMPUTERNAME-$(Get-Date -Format 'yyyy-MM-dd').html"
 ```
 
-## Contributing
-
-We welcome contributions from the cybersecurity community! Here's how you can help:
-
-### Ways to Contribute
-- **Security Checks** - Add new vulnerability detection capabilities
-- **Risk Assessment** - Improve risk scoring algorithms
-- **Documentation** - Enhance guides and examples
-- **Bug Reports** - Report issues and edge cases
-- **Feature Requests** - Suggest new functionality
-
-### Development Setup
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/new-security-check`
-3. Test your changes thoroughly
-4. Submit a pull request with detailed description
-
-### Contribution Guidelines
-- Follow PowerShell best practices and style conventions
-- Include error handling for all new functionality
-- Add appropriate risk levels and descriptions
-- Update documentation for new features
-- Test on multiple Windows versions when possible
-
 ## Troubleshooting
 
-### Common Issues
-
-**"Execution Policy" Errors:**
+**"Execution Policy" error when running the script directly:**
 ```powershell
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
+Using `Run-Analysis.bat` avoids this entirely.
 
-**Limited Results Without Admin:**
-- Some security checks require administrator privileges
-- Run PowerShell as Administrator for complete analysis
-- The script will warn about limitations and continue
+**Limited results (BitLocker, TPM, user accounts missing):**
+Some checks require administrator privileges. Use `Run-Analysis.bat` which handles elevation automatically, or right-click PowerShell and choose "Run as administrator".
 
-**Antivirus False Positives:**
-- Security tools may flag PowerShell security scripts
-- Add exception for the script location
-- Download from official GitHub repository only
+**Antivirus flags the script:**
+Security scanning tools are sometimes flagged by antivirus heuristics. Add an exception for the script folder or download directly from the official GitHub repository.
 
-**Network Connectivity Issues:**
-- Ensure Windows Firewall allows PowerShell network access
-- Check corporate proxy settings if downloading fails
-- Use offline installation if needed
+## Contributing
 
-### Getting Help
-- Check the [Wiki](../../wiki) for detailed documentation
-- Report bugs via [GitHub Issues](../../issues)
-- Join discussions in [GitHub Discussions](../../discussions)
-- Contact maintainers for security-related inquiries
+Contributions from the security community are welcome.
 
-## Educational Resources
+### Ways to Contribute
+- Add new security checks following the existing `Add-Finding` pattern
+- Improve risk scoring logic
+- Test on different Windows versions and hardware
+- Report bugs via GitHub Issues
+- Suggest features via GitHub Discussions
 
-### Learning Windows Security
-- [Microsoft Security Compliance Toolkit](https://docs.microsoft.com/en-us/windows/security/threat-protection/security-compliance-toolkit-10)
-- [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)
-- [SANS Windows Security](https://www.sans.org/white-papers/windows/)
-
-### PowerShell Security
-- [PowerShell Security Best Practices](https://docs.microsoft.com/en-us/powershell/scripting/learn/security/overview)
-- [Windows Security Cmdlets](https://docs.microsoft.com/en-us/powershell/module/defender/)
+### Guidelines
+- Follow existing PowerShell style conventions
+- Wrap all new checks in try/catch with graceful degradation
+- Include accurate risk levels and plain-English descriptions
+- Update `ENHANCEMENT_PLAN.md` to reflect completed or planned work
+- Test on both Windows 10 and Windows 11 where possible
 
 ## Legal and Ethical Use
 
-### Important Disclaimers
-- **Authorization Required** - Only use on systems you own or have explicit permission to test
-- **No Warranty** - Tool provided as-is for educational and legitimate security purposes
-- **Compliance Responsibility** - Users must ensure compliance with local laws and regulations
-- **Ethical Use Only** - Not intended for malicious activities
+- Only use on systems you own or have explicit written permission to assess
+- Tool provided as-is for educational and legitimate security purposes
+- Users are responsible for compliance with local laws and regulations
+- Not intended for malicious or unauthorized use
 
 ### Responsible Disclosure
-If you discover security vulnerabilities in this tool:
-1. **Do not** create public issues for security vulnerabilities
-2. Email security concerns to [nublexer@hotmail.com]
-3. Allow reasonable time for fixes before public disclosure
-4. We appreciate responsible security research
+To report security vulnerabilities in this tool, email nublexer@hotmail.com rather than creating a public issue. Allow reasonable time for a fix before public disclosure.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-```
-MIT License
+MIT License - see the [LICENSE](LICENSE) file for details.
 
 Copyright (c) 2025 Igor Dunaev / NubleX
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-```
-
 ## Acknowledgments
 
-- **Security Community** - For continuous feedback and contributions
-- **Microsoft Security Team** - For Windows security documentation
-- **PowerShell Community** - For scripting best practices and examples
-- **Cybersecurity Researchers** - For vulnerability research and threat intelligence
+- Security Community - for continuous feedback and contributions
+- Microsoft Security Team - for Windows security documentation
+- PowerShell Community - for scripting best practices
 
 ## Project Statistics
 
@@ -303,8 +304,6 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
 
 ---
 
-**Stay Secure, Stay Vigilant!**
-
-*This tool is part of the ongoing effort to make cybersecurity accessible to everyone. Together, we can build a more secure digital world.*
+Stay Secure, Stay Vigilant.
 
 Visit https://www.idarti.com
