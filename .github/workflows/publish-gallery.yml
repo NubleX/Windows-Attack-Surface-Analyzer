@@ -1,0 +1,109 @@
+name: Publish to PowerShell Gallery
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run only (WhatIf - no actual publish)'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  validate-and-publish:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up module folder structure
+        shell: pwsh
+        run: |
+          # The Gallery requires a folder named exactly after the module
+          # containing the .psd1, .psm1, and .ps1 files
+          $dest = ".\publish\WindowsAttackSurfaceAnalyzer"
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+
+          Copy-Item .\WindowsAttackSurfaceAnalyzer.ps1  $dest
+          Copy-Item .\WindowsAttackSurfaceAnalyzer.psm1 $dest
+          Copy-Item .\WindowsAttackSurfaceAnalyzer.psd1 $dest
+
+          Write-Host "Module folder contents:"
+          Get-ChildItem $dest
+
+      - name: Validate module manifest
+        shell: pwsh
+        run: |
+          $manifest = ".\publish\WindowsAttackSurfaceAnalyzer\WindowsAttackSurfaceAnalyzer.psd1"
+          $result = Test-ModuleManifest -Path $manifest -ErrorAction Stop
+          Write-Host "Manifest valid: $($result.Name) v$($result.Version)"
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -SkipPublisherCheck
+          $results = Invoke-ScriptAnalyzer `
+            -Path .\publish\WindowsAttackSurfaceAnalyzer\ `
+            -Severity Error `
+            -Recurse
+
+          if ($results) {
+            Write-Host "PSScriptAnalyzer found errors:"
+            $results | Format-Table -AutoSize
+            exit 1
+          } else {
+            Write-Host "PSScriptAnalyzer: no errors found."
+          }
+
+      - name: Verify version matches release tag
+        if: github.event_name == 'release'
+        shell: pwsh
+        run: |
+          $tag     = "${{ github.event.release.tag_name }}" -replace '^v', ''
+          $manifest = ".\publish\WindowsAttackSurfaceAnalyzer\WindowsAttackSurfaceAnalyzer.psd1"
+          $data    = Import-PowerShellDataFile $manifest
+          $version = $data.ModuleVersion
+
+          # Strip prerelease suffix from tag if present (e.g. 0.4.0-rc1 -> 0.4.0)
+          $tagBase = ($tag -split '-')[0]
+
+          if ($tagBase -ne $version) {
+            Write-Error "Version mismatch: release tag '$tagBase' does not match manifest '$version'"
+            exit 1
+          }
+          Write-Host "Version check passed: $version"
+
+      - name: Dry run publish (WhatIf)
+        shell: pwsh
+        run: |
+          Publish-Module `
+            -Path .\publish\WindowsAttackSurfaceAnalyzer `
+            -NuGetApiKey 'PLACEHOLDER' `
+            -WhatIf `
+            -Verbose
+        continue-on-error: true
+
+      - name: Publish to PowerShell Gallery
+        if: |
+          github.event_name == 'release' ||
+          (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
+        shell: pwsh
+        env:
+          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+        run: |
+          if (-not $env:PSGALLERY_API_KEY) {
+            Write-Error "PSGALLERY_API_KEY secret is not set. Add it in Settings > Secrets."
+            exit 1
+          }
+
+          Publish-Module `
+            -Path .\publish\WindowsAttackSurfaceAnalyzer `
+            -NuGetApiKey $env:PSGALLERY_API_KEY `
+            -Verbose
+
+          Write-Host ""
+          Write-Host "Published successfully."
+          Write-Host "View at: https://www.powershellgallery.com/packages/WindowsAttackSurfaceAnalyzer"
