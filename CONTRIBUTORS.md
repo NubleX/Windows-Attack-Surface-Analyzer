@@ -1,9 +1,13 @@
 - **Core Maintainers** - Long-term project stewardship
-- 
+- NubleX / Igor Dunaev
 - **Security Researchers** - Significant security improvements
-- 
+- NubleX / Igor Dunaev
 - **Feature Contributors** - Major feature additions
-- 
+- NubleX / Igor Dunaev
+- CLAUDE Opus 4.5 / 4.6
 - **Bug Hunters** - Critical bug fixes and improvements
-- 
+- CLAUDE Opus 4.5 / 4.6
 - **Documentation Heroes** - Substantial documentation contributions
+- NubleX / Igor Dunaev
+- CLAUDE Sonnet 4.5 / 4.6
+- CLAUDE Haiku 4.5

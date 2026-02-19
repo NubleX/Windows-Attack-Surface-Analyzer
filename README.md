@@ -3,13 +3,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://docs.microsoft.com/en-us/powershell/)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-blue.svg)](https://www.microsoft.com/windows)
-[![Version](https://img.shields.io/badge/Version-0.2.0-brightgreen.svg)](https://github.com/NubleX/Windows-Attack-Surface-Analyzer)
+[![Version](https://img.shields.io/badge/Version-0.3.0-brightgreen.svg)](https://github.com/NubleX/Windows-Attack-Surface-Analyzer)
+[![CI](https://github.com/NubleX/Windows-Attack-Surface-Analyzer/actions/workflows/test.yml/badge.svg)](https://github.com/NubleX/Windows-Attack-Surface-Analyzer/actions/workflows/test.yml)
 
 A comprehensive, open-source PowerShell tool for analyzing Windows security posture and identifying potential attack vectors. Works on Windows 10 and all versions of Windows 11. No installation required.
 
 ## What it Does
 
-The Windows Attack Surface Analyzer performs a thorough security assessment of your Windows system across 13 categories:
+The Windows Attack Surface Analyzer performs a thorough security assessment of your Windows system across 21 categories:
 
 - **Network Attack Surface** - Open ports, listening services, and network exposure
 - **Service Security** - Risky or unnecessary Windows services
@@ -22,8 +23,16 @@ The Windows Attack Surface Analyzer performs a thorough security assessment of y
 - **Hardware Security** - TPM, Secure Boot, VBS, Memory Integrity, Credential Guard, Kernel DMA Protection
 - **Disk Encryption** - BitLocker status per drive with protector type
 - **Advanced Defender** - Tamper Protection, Cloud Protection, ASR rules, Controlled Folder Access, definition age, DEP
-- **Windows 11 Features** - Smart App Control, Windows Hello, Windows Recall (version-gated, skips gracefully on Win10)
+- **Windows 11 Features** - Smart App Control, Windows Hello, Windows Recall (version-gated, skips on Win10)
 - **PowerShell Security** - Execution policy, Script Block Logging, Module Logging, Language Mode
+- **Defender ASR Rules** - Per-rule breakdown with friendly names, scan age, sample submission, Application Guard
+- **Exploit Protection** - ASLR, SEHOP, CFG, Heap Terminate on Corruption via Get-ProcessMitigation
+- **Privacy Settings** - Diagnostic data level, Advertising ID, Activity History, camera/mic/location permissions
+- **Network Security** - IPv6, DNS over HTTPS (DoH), Wi-Fi authentication (WPA3/WPA2/WEP), Bluetooth, VPN
+- **Remote Access Security** - RDP NLA, RDP port, Remote Assistance, WinRM listener status
+- **WSL Security** - WSL version, installed distributions, network mode (NAT vs mirrored)
+- **Application Security** - Edge SmartScreen/Enhanced Security, Adobe, Java, Chrome, Firefox version reporting
+- **Authentication Policy** - Autologon, cached credentials, account lockout threshold, password length and expiry
 
 ## Quick Start
 
@@ -64,7 +73,7 @@ That is all. The launcher handles administrator elevation automatically, selects
        Comprehensive Security Assessment Tool
 
   Author : NubleX / Igor Dunaev
-  Version: 0.2.0
+  Version: 0.3.0
   System : Windows 11 Pro (Build 22631, 64-bit)
   Engine : PowerShell 7.4.1 (Core edition)
 ================================================

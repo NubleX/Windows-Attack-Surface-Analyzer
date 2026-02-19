@@ -83,53 +83,62 @@ This plan tracks enhancements to make the Windows Attack Surface Analyzer more c
 
 ---
 
-## v0.3.0 — NEXT
+## v0.3.0 — COMPLETED
 
-### Phase 2 (remaining Defender)
-- [ ] Per-rule ASR breakdown with friendly names
-- [ ] Last scan time (quick/full)
-- [ ] Automatic sample submission setting
-- [ ] ASLR, SEHOP, CFG via `Get-ProcessMitigation`
-- [ ] Microsoft Defender Application Guard status
+### Phase 2 (remaining Defender) - DONE
+- [x] Per-rule ASR breakdown with friendly names (all 15 known rule GUIDs mapped)
+- [x] Last quick scan and full scan age in days
+- [x] Automatic sample submission setting
+- [x] ASLR, SEHOP, CFG, Bottom-Up ASLR, Heap Terminate via Get-ProcessMitigation
+- [x] Microsoft Defender Application Guard status
 
-### Phase 3: Privacy & Data Protection
-- [ ] Diagnostic data level (Full / Required / Optional)
-- [ ] Advertising ID status
-- [ ] Activity history settings
-- [ ] Location, camera, microphone access permissions
-- [ ] App background permissions
+### Phase 3: Privacy & Data Protection - DONE
+- [x] Diagnostic data level (Security/Off, Required, Enhanced, Optional/Full)
+- [x] Advertising ID status
+- [x] Activity history settings
+- [x] Location, camera, microphone access permissions
 
-### Phase 4: Network Security Enhancements
-- [ ] IPv6 status and implications
-- [ ] DNS over HTTPS (DoH) configuration
-- [ ] Wi-Fi security profile (WPA3 vs WPA2)
-- [ ] Bluetooth enabled / discoverable / paired devices
-- [ ] VPN connection status
+### Phase 4: Network Security Enhancements - DONE
+- [x] IPv6 adapter binding status
+- [x] DNS over HTTPS (DoH) configuration
+- [x] Wi-Fi authentication type (WPA3 / WPA2 / WEP / Open)
+- [x] Bluetooth service status
+- [x] VPN connection status and profile count
 
-### Phase 4.4: Remote Access Security
-- [ ] RDP Network Level Authentication (NLA)
-- [ ] RDP port (default 3389 vs changed)
-- [ ] RDP session timeout
-- [ ] Remote Assistance status
-- [ ] PowerShell Remoting (WinRM) status
+### Phase 4.4: Remote Access Security - DONE
+- [x] RDP Network Level Authentication (NLA)
+- [x] RDP port (default 3389 vs custom)
+- [x] Remote Assistance status
+- [x] PowerShell Remoting (WinRM) service and listener count
+- [ ] RDP session timeout (deferred to v0.4.0)
 
-### Phase 4.3: WSL Security
-- [ ] WSL version (1 vs 2)
-- [ ] Installed distributions
-- [ ] Network mode (NAT vs mirrored)
+### Phase 4.3: WSL Security - DONE
+- [x] WSL version (1 vs 2)
+- [x] Installed distributions
+- [x] Network mode (NAT vs mirrored via .wslconfig)
 
-### Phase 5 (remaining): Application Security
-- [ ] Outdated browser / Adobe / Java detection
-- [ ] Applications from unknown publishers
-- [ ] Microsoft Edge SmartScreen status
-- [ ] Edge Enhanced Security Mode
+### Phase 5 (remaining): Application Security - DONE
+- [x] Microsoft Edge SmartScreen policy status
+- [x] Edge Enhanced Security Mode policy status
+- [x] Adobe Acrobat Reader version detection
+- [x] Java Runtime Environment version detection
+- [x] Google Chrome version detection
+- [x] Mozilla Firefox version detection
+- [ ] Application publisher verification (deferred to v0.4.0)
 
-### Phase 6: Account & Authentication
-- [ ] Account lockout threshold/duration
-- [ ] Password complexity requirements
-- [ ] Password history enforcement
-- [ ] Autologon configuration check
-- [ ] Cached domain credentials count
+### Phase 6: Account & Authentication - DONE
+- [x] Autologon configuration (Critical finding if enabled)
+- [x] Cached domain credential count
+- [x] Account lockout threshold
+- [x] Minimum password length
+- [x] Password maximum age / expiry
+- [ ] Password history enforcement (deferred to v0.4.0 -- requires secedit)
+
+### CI / Testing - DONE
+- [x] GitHub Actions workflow (.github/workflows/test.yml)
+  - PSScriptAnalyzer lint (errors fail build, warnings informational)
+  - Full analyzer run with HTML report export
+  - Report uploaded as build artifact (30 day retention)
 
 ---
 
@@ -166,8 +175,8 @@ This plan tracks enhancements to make the Windows Attack Surface Analyzer more c
 
 | Version | Focus | Status |
 |---------|-------|--------|
-| 0.1.0 | Initial release — 8 core checks | Released |
-| **0.2.0** | **Hardware security, Defender deep-dive, Win11 features, UX launcher** | **Released** |
-| 0.3.0 | Privacy, Network, Remote access, WSL, Auth | Planned |
-| 0.4.0 | System hardening, JSON/CSV export | Planned |
-| 1.0.0 | Performance, docs, CIS baselines, full test suite | Planned |
+| 0.1.0 | Initial release -- 8 core checks | Released |
+| 0.2.0 | Hardware security, Defender deep-dive, Win11 features, UX launcher | Released |
+| 0.3.0 | ASR details, exploit protection, privacy, network, remote access, WSL, apps, auth, CI | Released |
+| 0.4.0 | System hardening (drivers, hosts, scheduled tasks), JSON/CSV export | Planned |
+| 1.0.0 | Performance (parallel scans, quick mode), CIS baseline comparison, full test suite | Planned |

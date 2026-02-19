@@ -3,7 +3,7 @@
 # Created by NubleX / Igor Dunaev, 2025
 #
 # Authors: Security Community
-# Version: 0.2.0
+# Version: 0.3.0
 # License: MIT
 # GitHub: https://github.com/NubleX/Windows-Attack-Surface-Analyzer
 #
@@ -42,7 +42,7 @@ $script:IsWindows10     = ($script:WinBuild -ge 10240) -and (-not $script:IsWind
 
 # ── Scan progress tracking ────────────────────────────────────────────────────
 $script:ScanStep  = 0
-$script:ScanTotal = 13
+$script:ScanTotal = 21
 function Write-ScanProgress {
     param([string]$Section)
     $script:ScanStep++
@@ -907,6 +907,646 @@ function Get-PowerShellSecurity {
     } catch { }
 }
 
+function Get-DefenderExtended {
+    Write-ColorOutput "`n14. DEFENDER - ASR RULES AND SCAN STATUS" 'Header'
+    Write-ColorOutput "==========================================" 'Header'
+
+    # Friendly names for all known ASR rule GUIDs
+    $asrNames = @{
+        '56a863a9-875e-4185-98a7-b882c64b5ce5' = 'Block abuse of vulnerable signed drivers'
+        '7674ba52-37eb-4a4f-a9a1-f0f9a1619a2c' = 'Block Adobe Reader from creating child processes'
+        'd4f940ab-401b-4efc-aadc-ad5f3c50688a' = 'Block Office apps from creating child processes'
+        '9e6c4e1f-7d60-472f-ba1a-a39ef669e4b0' = 'Block credential stealing from LSASS'
+        'be9ba2d9-53ea-4cdc-84e5-9b1eeee46550' = 'Block executable content from email'
+        '01443614-cd74-433a-b99e-2ecdc07bfc25' = 'Block executable files unless trusted (machine-learning)'
+        '5beb7efe-fd9a-4556-801d-275e5ffc04cc' = 'Block obfuscated scripts'
+        'd3e037e1-3eb8-44c8-a917-57927947596d' = 'Block JavaScript/VBScript launching executables'
+        '3b576869-a4ec-4529-8536-b80a7769e899' = 'Block Office apps injecting code into processes'
+        '75668c1f-73b5-4cf0-bb93-3ecf5cb7cc84' = 'Block Office apps from creating executable content'
+        '26190899-1602-49e8-8b27-eb1d0a1ce869' = 'Block Office communication apps from creating child processes'
+        'e6db77e5-3df2-4cf1-b95a-636979351e5b' = 'Block persistence through WMI event subscription'
+        'b2b3f03d-6a65-4f7b-a9c7-1c7ef74a9ba4' = 'Block untrusted/unsigned processes from USB'
+        '92e97fa1-2edf-4476-bdd6-9dd0b4dddc7b' = 'Block Win32 API calls from Office macros'
+        'c1db55ab-c21a-4637-bb3f-a12568109d35' = 'Use advanced ransomware protection'
+    }
+    $asrActionLabels = @{ 0 = 'Off'; 1 = 'Block'; 2 = 'Audit'; 6 = 'Warn' }
+
+    try {
+        $pref   = Get-MpPreference    -ErrorAction SilentlyContinue
+        $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
+
+        if ($pref) {
+            # Per-rule ASR breakdown
+            $ids     = $pref.AttackSurfaceReductionRules_Ids
+            $actions = $pref.AttackSurfaceReductionRules_Actions
+            if ($ids -and $ids.Count -gt 0) {
+                for ($i = 0; $i -lt $ids.Count; $i++) {
+                    $id     = $ids[$i].ToLower()
+                    $action = if ($i -lt $actions.Count) { $actions[$i] } else { 0 }
+                    $label  = if ($asrActionLabels.ContainsKey([int]$action)) { $asrActionLabels[[int]$action] } else { "Unknown ($action)" }
+                    $name   = if ($asrNames.ContainsKey($id)) { $asrNames[$id] } else { "Unknown rule ($id)" }
+                    $risk   = if ($action -eq 1) { 'Good' } elseif ($action -eq 2) { 'Low' } else { 'Medium' }
+                    Add-Finding 'ASR' $name $label $risk "ASR rule state"
+                }
+            } else {
+                Add-Finding 'ASR' 'ASR Rules' 'None configured' 'Medium' `
+                    'No Attack Surface Reduction rules are active' `
+                    'Configure ASR rules via Group Policy, Intune, or PowerShell Set-MpPreference'
+            }
+
+            # Sample submission
+            $sampleLabels = @{ 0 = 'Always prompt'; 1 = 'Send safe samples'; 2 = 'Never send'; 3 = 'Send all samples' }
+            $sampleVal  = $pref.SubmitSamplesConsent
+            $sampleText = if ($sampleLabels.ContainsKey([int]$sampleVal)) { $sampleLabels[[int]$sampleVal] } else { "Unknown ($sampleVal)" }
+            $sampleRisk = if ($sampleVal -eq 3) { 'Good' } elseif ($sampleVal -eq 1) { 'Good' } else { 'Low' }
+            Add-Finding 'Defender' 'Sample Submission' $sampleText $sampleRisk `
+                'Controls whether suspicious files are sent to Microsoft for analysis'
+        }
+
+        if ($status) {
+            # Last quick scan
+            if ($status.QuickScanAge -ge 0) {
+                $qAge = $status.QuickScanAge
+                $qRisk = if ($qAge -gt 7) { 'Medium' } elseif ($qAge -gt 3) { 'Low' } else { 'Good' }
+                Add-Finding 'Defender' 'Last Quick Scan' "$qAge day(s) ago" $qRisk `
+                    'Regular quick scans catch active threats early'
+            }
+            # Last full scan
+            if ($status.FullScanAge -ge 0) {
+                $fAge = $status.FullScanAge
+                $fRisk = if ($fAge -gt 30) { 'Medium' } elseif ($fAge -gt 14) { 'Low' } else { 'Good' }
+                Add-Finding 'Defender' 'Last Full Scan' "$fAge day(s) ago" $fRisk `
+                    'Monthly full scans find deeply hidden threats'
+            }
+        }
+    } catch {
+        Add-Finding 'Defender' 'Extended Analysis' 'Failed' 'Medium' `
+            "Could not complete extended Defender check: $($_.Exception.Message)"
+    }
+
+    # Defender Application Guard
+    try {
+        $dag = Get-WindowsOptionalFeature -Online -FeatureName Windows-Defender-ApplicationGuard `
+               -ErrorAction SilentlyContinue
+        if ($dag) {
+            if ($dag.State -eq 'Enabled') {
+                Add-Finding 'Defender' 'Application Guard' 'Enabled' 'Good' `
+                    'Edge and Office open untrusted content in an isolated hardware container'
+            } else {
+                Add-Finding 'Defender' 'Application Guard' 'Disabled' 'Low' `
+                    'Application Guard isolates untrusted websites and Office documents' `
+                    'Enable in Windows Security or: Enable-WindowsOptionalFeature -Online -FeatureName Windows-Defender-ApplicationGuard'
+            }
+        }
+    } catch { }
+}
+
+function Get-ExploitProtection {
+    Write-ColorOutput "`n15. EXPLOIT PROTECTION (ASLR / SEHOP / CFG)" 'Header'
+    Write-ColorOutput "=============================================" 'Header'
+
+    try {
+        $ep = Get-ProcessMitigation -System -ErrorAction SilentlyContinue
+        if ($ep) {
+            # ASLR - ForceRelocateImages
+            $aslrOn = $ep.ASLR.ForceRelocateImages -eq 'ON'
+            Add-Finding 'ExploitProtection' 'ASLR Force Relocate' `
+                $(if ($aslrOn) { 'Enabled' } else { 'Disabled' }) `
+                $(if ($aslrOn) { 'Good' } else { 'Medium' }) `
+                'Address Space Layout Randomization makes memory addresses unpredictable for attackers'
+
+            # BottomUp ASLR
+            $buOn = $ep.ASLR.BottomUp -eq 'ON'
+            Add-Finding 'ExploitProtection' 'ASLR Bottom-Up Randomisation' `
+                $(if ($buOn) { 'Enabled' } else { 'Disabled' }) `
+                $(if ($buOn) { 'Good' } else { 'Low' }) `
+                'Randomises heap, stack and mapped memory base addresses'
+
+            # SEHOP
+            $sehopOn = $ep.SEHOP.Enable -eq 'ON'
+            Add-Finding 'ExploitProtection' 'SEHOP' `
+                $(if ($sehopOn) { 'Enabled' } else { 'Disabled' }) `
+                $(if ($sehopOn) { 'Good' } else { 'Medium' }) `
+                'Structured Exception Handler Overwrite Protection blocks SEH chain exploits'
+
+            # CFG
+            $cfgOn = $ep.CFG.Enable -eq 'ON'
+            Add-Finding 'ExploitProtection' 'Control Flow Guard (CFG)' `
+                $(if ($cfgOn) { 'Enabled' } else { 'Disabled' }) `
+                $(if ($cfgOn) { 'Good' } else { 'Low' }) `
+                'CFG prevents attackers from redirecting code execution to arbitrary locations'
+
+            # Heap Terminate on Corruption
+            $heapOn = $ep.Heap.TerminateOnError -eq 'ON'
+            Add-Finding 'ExploitProtection' 'Heap Terminate on Corruption' `
+                $(if ($heapOn) { 'Enabled' } else { 'Disabled' }) `
+                $(if ($heapOn) { 'Good' } else { 'Low' }) `
+                'Kills the process immediately when heap corruption is detected'
+        } else {
+            Add-Finding 'ExploitProtection' 'Get-ProcessMitigation' 'Unavailable' 'Info' `
+                'Process mitigation data could not be read on this system'
+        }
+    } catch {
+        Add-Finding 'ExploitProtection' 'Analysis' 'Failed' 'Medium' `
+            "Could not read exploit protection settings: $($_.Exception.Message)"
+    }
+}
+
+function Get-PrivacySettings {
+    Write-ColorOutput "`n16. PRIVACY SETTINGS" 'Header'
+    Write-ColorOutput "=====================" 'Header'
+
+    # Telemetry / Diagnostic data level
+    try {
+        $telVal = (Get-ItemProperty `
+            -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection' `
+            -Name 'AllowTelemetry' -ErrorAction SilentlyContinue).AllowTelemetry
+        $telLabels = @{ 0 = 'Security (off)'; 1 = 'Required'; 2 = 'Enhanced'; 3 = 'Optional (Full)' }
+        $telText   = if ($telLabels.ContainsKey([int]$telVal)) { $telLabels[[int]$telVal] } else { 'Default (Required)' }
+        $telRisk   = if ($telVal -le 1) { 'Good' } elseif ($telVal -eq 2) { 'Low' } else { 'Medium' }
+        Add-Finding 'Privacy' 'Diagnostic Data Level' $telText $telRisk `
+            'Controls how much system data is sent to Microsoft'
+    } catch {
+        Add-Finding 'Privacy' 'Diagnostic Data Level' 'Default (not explicitly set)' 'Info' `
+            'No policy override found -- Windows default applies'
+    }
+
+    # Advertising ID
+    try {
+        $adId = (Get-ItemProperty `
+            -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo' `
+            -Name 'Enabled' -ErrorAction SilentlyContinue).Enabled
+        if ($adId -eq 0) {
+            Add-Finding 'Privacy' 'Advertising ID' 'Disabled' 'Good' `
+                'Apps cannot use your advertising ID to track you across apps'
+        } else {
+            Add-Finding 'Privacy' 'Advertising ID' 'Enabled' 'Low' `
+                'Apps can access your advertising ID for cross-app tracking' `
+                'Disable in Settings > Privacy & Security > General'
+        }
+    } catch { }
+
+    # Activity History
+    try {
+        $actVal = (Get-ItemProperty `
+            -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' `
+            -Name 'PublishUserActivities' -ErrorAction SilentlyContinue).PublishUserActivities
+        if ($actVal -eq 0) {
+            Add-Finding 'Privacy' 'Activity History' 'Disabled by policy' 'Good' `
+                'Windows Timeline activity is not collected or uploaded'
+        } else {
+            Add-Finding 'Privacy' 'Activity History' 'Enabled' 'Low' `
+                'Activity history is recorded and may be synced to Microsoft' `
+                'Disable in Settings > Privacy & Security > Activity history'
+        }
+    } catch { }
+
+    # Location
+    try {
+        $locKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location'
+        $locVal = (Get-ItemProperty -Path $locKey -Name 'Value' -ErrorAction SilentlyContinue).Value
+        $locRisk = if ($locVal -eq 'Deny') { 'Good' } else { 'Low' }
+        Add-Finding 'Privacy' 'Location Access' $(if ($locVal -eq 'Deny') { 'Denied' } else { 'Allowed' }) $locRisk `
+            'Controls whether apps can access your physical location'
+    } catch { }
+
+    # Camera
+    try {
+        $camKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\webcam'
+        $camVal = (Get-ItemProperty -Path $camKey -Name 'Value' -ErrorAction SilentlyContinue).Value
+        $camRisk = if ($camVal -eq 'Deny') { 'Good' } else { 'Low' }
+        Add-Finding 'Privacy' 'Camera Access' $(if ($camVal -eq 'Deny') { 'Denied' } else { 'Allowed' }) $camRisk `
+            'Controls whether apps can access your webcam'
+    } catch { }
+
+    # Microphone
+    try {
+        $micKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone'
+        $micVal = (Get-ItemProperty -Path $micKey -Name 'Value' -ErrorAction SilentlyContinue).Value
+        $micRisk = if ($micVal -eq 'Deny') { 'Good' } else { 'Low' }
+        Add-Finding 'Privacy' 'Microphone Access' $(if ($micVal -eq 'Deny') { 'Denied' } else { 'Allowed' }) $micRisk `
+            'Controls whether apps can access your microphone'
+    } catch { }
+}
+
+function Get-NetworkSecurity {
+    Write-ColorOutput "`n17. NETWORK SECURITY (IPv6 / DoH / Wi-Fi / Bluetooth)" 'Header'
+    Write-ColorOutput "=======================================================" 'Header'
+
+    # IPv6
+    try {
+        $ipv6Bindings = Get-NetAdapterBinding -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Enabled -eq $true }
+        if ($ipv6Bindings) {
+            Add-Finding 'Network' 'IPv6' "Enabled on $($ipv6Bindings.Count) adapter(s)" 'Info' `
+                'IPv6 is active. Ensure firewall rules cover IPv6 traffic as well as IPv4'
+        } else {
+            Add-Finding 'Network' 'IPv6' 'Disabled' 'Info' `
+                'IPv6 is not bound to any adapter'
+        }
+    } catch { }
+
+    # DNS over HTTPS (DoH)
+    try {
+        $dohVal = (Get-ItemProperty `
+            -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' `
+            -Name 'EnableAutoDoh' -ErrorAction SilentlyContinue).EnableAutoDoh
+        if ($dohVal -eq 2) {
+            Add-Finding 'Network' 'DNS over HTTPS (DoH)' 'Allowed (auto)' 'Good' `
+                'Windows will use DoH when a compatible DNS server is configured'
+        } elseif ($dohVal -eq 1) {
+            Add-Finding 'Network' 'DNS over HTTPS (DoH)' 'Required' 'Good' `
+                'DNS queries are encrypted -- DNS-based eavesdropping is blocked'
+        } else {
+            Add-Finding 'Network' 'DNS over HTTPS (DoH)' 'Not configured' 'Low' `
+                'DNS queries are sent in plaintext by default' `
+                'Enable DoH in Settings > Network > Wi-Fi or Ethernet > DNS server assignment'
+        }
+    } catch { }
+
+    # Wi-Fi security (check active connected profile)
+    try {
+        $wlanOutput = & netsh wlan show interfaces 2>&1
+        if ($wlanOutput -match 'Authentication\s+:\s+(.+)') {
+            $auth = $Matches[1].Trim()
+            $wifiRisk = if ($auth -match 'WPA3') { 'Good' } `
+                        elseif ($auth -match 'WPA2') { 'Low' } `
+                        elseif ($auth -match 'WPA[^2]|WEP|Open') { 'High' } `
+                        else { 'Info' }
+            Add-Finding 'Network' 'Wi-Fi Authentication' $auth $wifiRisk `
+                'Wi-Fi security protocol of the currently connected network'
+        } elseif ($wlanOutput -match 'There is no wireless interface') {
+            Add-Finding 'Network' 'Wi-Fi' 'No wireless adapter' 'Info' `
+                'No Wi-Fi adapter detected on this system'
+        } else {
+            Add-Finding 'Network' 'Wi-Fi' 'Not connected' 'Info' `
+                'No active Wi-Fi connection'
+        }
+    } catch { }
+
+    # Bluetooth
+    try {
+        $btService = Get-Service -Name bthserv -ErrorAction SilentlyContinue
+        if ($btService -and $btService.Status -eq 'Running') {
+            Add-Finding 'Network' 'Bluetooth Service' 'Running' 'Low' `
+                'Bluetooth is active -- ensure device is not set to discoverable in public places' `
+                'Turn off Bluetooth when not in use: Settings > Bluetooth & devices'
+        } elseif ($btService) {
+            Add-Finding 'Network' 'Bluetooth Service' 'Stopped' 'Good' `
+                'Bluetooth service is not running'
+        } else {
+            Add-Finding 'Network' 'Bluetooth' 'Not present' 'Good' `
+                'No Bluetooth service found on this system'
+        }
+    } catch { }
+
+    # VPN
+    try {
+        $vpnConnections = Get-VpnConnection -ErrorAction SilentlyContinue
+        if ($vpnConnections) {
+            $connected = $vpnConnections | Where-Object { $_.ConnectionStatus -eq 'Connected' }
+            if ($connected) {
+                Add-Finding 'Network' 'VPN' "Connected ($($connected.Name))" 'Good' `
+                    'An active VPN connection is encrypting your traffic'
+            } else {
+                Add-Finding 'Network' 'VPN' "$($vpnConnections.Count) profile(s) configured, not connected" 'Info' `
+                    'VPN profiles exist but none are currently active'
+            }
+        } else {
+            Add-Finding 'Network' 'VPN' 'No profiles configured' 'Info' `
+                'No VPN connections are configured on this system'
+        }
+    } catch { }
+}
+
+function Get-RemoteAccessSecurity {
+    Write-ColorOutput "`n18. REMOTE ACCESS SECURITY (RDP / WinRM)" 'Header'
+    Write-ColorOutput "==========================================" 'Header'
+
+    # RDP enabled?
+    try {
+        $rdpEnabled = (Get-ItemProperty `
+            -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' `
+            -Name 'fDenyTSConnections' -ErrorAction SilentlyContinue).fDenyTSConnections
+        if ($rdpEnabled -eq 0) {
+            # RDP is on -- check NLA
+            $nla = (Get-ItemProperty `
+                -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                -Name 'UserAuthenticationRequired' -ErrorAction SilentlyContinue).UserAuthenticationRequired
+            if ($nla -eq 1) {
+                Add-Finding 'RemoteAccess' 'RDP Network Level Authentication' 'Enabled' 'Good' `
+                    'NLA requires authentication before a full remote session is established'
+            } else {
+                Add-Finding 'RemoteAccess' 'RDP Network Level Authentication' 'Disabled' 'High' `
+                    'Without NLA the login screen is exposed to unauthenticated attackers' `
+                    'Enable NLA: System Properties > Remote > "Allow connections only from computers running Remote Desktop with NLA"'
+            }
+
+            # RDP port
+            $rdpPort = (Get-ItemProperty `
+                -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                -Name 'PortNumber' -ErrorAction SilentlyContinue).PortNumber
+            if ($rdpPort -and $rdpPort -ne 3389) {
+                Add-Finding 'RemoteAccess' 'RDP Port' "$rdpPort (non-default)" 'Good' `
+                    'Using a non-default port reduces automated scan hits'
+            } elseif ($rdpPort) {
+                Add-Finding 'RemoteAccess' 'RDP Port' '3389 (default)' 'Low' `
+                    'Default RDP port is targeted by automated internet scanners' `
+                    'Consider changing to a high, non-standard port and restricting via firewall'
+            }
+        } else {
+            Add-Finding 'RemoteAccess' 'RDP' 'Disabled' 'Good' `
+                'Remote Desktop is turned off -- no RDP attack surface'
+        }
+    } catch {
+        Add-Finding 'RemoteAccess' 'RDP' 'Check Failed' 'Medium' `
+            "Could not determine RDP status: $($_.Exception.Message)"
+    }
+
+    # Remote Assistance
+    try {
+        $ra = (Get-ItemProperty `
+            -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' `
+            -Name 'fAllowToGetHelp' -ErrorAction SilentlyContinue).fAllowToGetHelp
+        if ($ra -eq 1) {
+            Add-Finding 'RemoteAccess' 'Remote Assistance' 'Enabled' 'Medium' `
+                'Remote Assistance allows others to connect to your session when invited' `
+                'Disable if not needed: System Properties > Remote > uncheck "Allow Remote Assistance"'
+        } else {
+            Add-Finding 'RemoteAccess' 'Remote Assistance' 'Disabled' 'Good' `
+                'Remote Assistance connections are not allowed'
+        }
+    } catch { }
+
+    # WinRM (PowerShell Remoting)
+    try {
+        $winrm = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+        if ($winrm -and $winrm.Status -eq 'Running') {
+            $winrmListeners = & winrm enumerate winrm/config/listener 2>&1
+            $listenerCount  = ([regex]::Matches($winrmListeners, 'Listener')).Count
+            Add-Finding 'RemoteAccess' 'WinRM (PowerShell Remoting)' "Running ($listenerCount listener(s))" 'Medium' `
+                'WinRM enables remote PowerShell execution -- restrict to trusted hosts if needed' `
+                'Restrict: winrm set winrm/config/client @{TrustedHosts="192.168.1.*"}'
+        } elseif ($winrm) {
+            Add-Finding 'RemoteAccess' 'WinRM (PowerShell Remoting)' 'Stopped' 'Good' `
+                'PowerShell Remoting service is not running'
+        }
+    } catch { }
+}
+
+function Get-WSLSecurity {
+    Write-ColorOutput "`n19. WINDOWS SUBSYSTEM FOR LINUX (WSL)" 'Header'
+    Write-ColorOutput "=======================================" 'Header'
+
+    try {
+        $wslFeature = Get-WindowsOptionalFeature -Online `
+            -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
+        $vmpFeature = Get-WindowsOptionalFeature -Online `
+            -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
+
+        if ($wslFeature -and $wslFeature.State -eq 'Enabled') {
+            $wslVer = if ($vmpFeature -and $vmpFeature.State -eq 'Enabled') { '2' } else { '1' }
+            Add-Finding 'WSL' 'WSL Version' "WSL$wslVer installed" 'Low' `
+                'WSL creates a Linux environment inside Windows -- it expands the attack surface' `
+                'Remove if not needed: wsl --unregister <distro>'
+
+            # List installed distributions
+            try {
+                $distros = & wsl --list --quiet 2>&1 | Where-Object { $_ -and $_.Trim() -ne '' }
+                if ($distros) {
+                    $distroList = ($distros | ForEach-Object { $_.Trim() }) -join ', '
+                    Add-Finding 'WSL' 'Installed Distributions' $distroList 'Info' `
+                        'Each installed distribution is a separate Linux environment'
+                }
+            } catch { }
+
+            # WSL2 network mode (mirrored = more exposure)
+            if ($wslVer -eq '2') {
+                try {
+                    $wslConfigPath = Join-Path $env:USERPROFILE '.wslconfig'
+                    if (Test-Path $wslConfigPath) {
+                        $wslConfig = Get-Content $wslConfigPath -Raw -ErrorAction SilentlyContinue
+                        if ($wslConfig -match 'networkingMode\s*=\s*mirrored') {
+                            Add-Finding 'WSL' 'WSL2 Network Mode' 'Mirrored' 'Medium' `
+                                'Mirrored mode exposes WSL directly on the host network interfaces'
+                        } else {
+                            Add-Finding 'WSL' 'WSL2 Network Mode' 'NAT (default)' 'Good' `
+                                'WSL2 is behind NAT -- not directly accessible from the network'
+                        }
+                    } else {
+                        Add-Finding 'WSL' 'WSL2 Network Mode' 'NAT (default, no .wslconfig)' 'Good' `
+                            'WSL2 uses NAT by default'
+                    }
+                } catch { }
+            }
+        } else {
+            Add-Finding 'WSL' 'WSL' 'Not installed' 'Good' `
+                'Windows Subsystem for Linux is not present'
+        }
+    } catch {
+        Add-Finding 'WSL' 'Analysis' 'Failed' 'Low' `
+            "Could not check WSL status: $($_.Exception.Message)"
+    }
+}
+
+function Get-ApplicationSecurity {
+    Write-ColorOutput "`n20. APPLICATION SECURITY (BROWSERS / EDGE / JAVA)" 'Header'
+    Write-ColorOutput "===================================================" 'Header'
+
+    # Microsoft Edge SmartScreen
+    try {
+        $edgeSS = (Get-ItemProperty `
+            -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' `
+            -Name 'SmartScreenEnabled' -ErrorAction SilentlyContinue).SmartScreenEnabled
+        if ($edgeSS -eq 0) {
+            Add-Finding 'Application' 'Edge SmartScreen' 'Disabled by policy' 'High' `
+                'SmartScreen is off -- Edge will not warn about malicious sites or downloads' `
+                'Enable: Edge Settings > Privacy, search, and services > Microsoft Defender SmartScreen'
+        } elseif ($null -ne $edgeSS) {
+            Add-Finding 'Application' 'Edge SmartScreen' 'Enabled by policy' 'Good' `
+                'SmartScreen is enforced via policy'
+        } else {
+            # Check user-level setting
+            Add-Finding 'Application' 'Edge SmartScreen' 'Controlled by user setting' 'Low' `
+                'No policy override -- verify SmartScreen is on in Edge settings'
+        }
+    } catch { }
+
+    # Edge Enhanced Security Mode
+    try {
+        $edgeESM = (Get-ItemProperty `
+            -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' `
+            -Name 'EnhancedSecurityModeEnabled' -ErrorAction SilentlyContinue).EnhancedSecurityModeEnabled
+        if ($edgeESM -eq 1) {
+            Add-Finding 'Application' 'Edge Enhanced Security Mode' 'Enabled' 'Good' `
+                'Enhanced Security Mode disables JIT compilation to reduce exploit risk'
+        } else {
+            Add-Finding 'Application' 'Edge Enhanced Security Mode' 'Not enforced' 'Low' `
+                'Enhanced Security Mode provides extra browser exploit protection' `
+                'Enable: Edge Settings > Privacy, search, and services > Enhance your security on the web'
+        }
+    } catch { }
+
+    # Adobe Reader / Acrobat version (common attack vector)
+    try {
+        $adobePaths = @(
+            'HKLM:\SOFTWARE\Adobe\Acrobat Reader\DC\Installer',
+            'HKLM:\SOFTWARE\Wow6432Node\Adobe\Acrobat Reader\DC\Installer'
+        )
+        $adobeFound = $false
+        foreach ($path in $adobePaths) {
+            $adobeKey = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
+            if ($adobeKey) {
+                $adobeFound = $true
+                $adobeVer  = $adobeKey.ProductVersion
+                $installDate = $adobeKey.PSObject.Properties['InstallDate']
+                Add-Finding 'Application' 'Adobe Acrobat Reader' "Installed (v$adobeVer)" 'Low' `
+                    'Adobe Reader is a frequent exploit target -- keep it updated' `
+                    'Update via: Help > Check for Updates'
+                break
+            }
+        }
+        if (-not $adobeFound) {
+            Add-Finding 'Application' 'Adobe Acrobat Reader' 'Not installed' 'Good' `
+                'Adobe Reader not found -- one less high-value attack target'
+        }
+    } catch { }
+
+    # Java Runtime (common vulnerability)
+    try {
+        $javaKey = Get-ItemProperty `
+            -Path 'HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment' `
+            -ErrorAction SilentlyContinue
+        if (-not $javaKey) {
+            $javaKey = Get-ItemProperty `
+                -Path 'HKLM:\SOFTWARE\Wow6432Node\JavaSoft\Java Runtime Environment' `
+                -ErrorAction SilentlyContinue
+        }
+        if ($javaKey -and $javaKey.CurrentVersion) {
+            Add-Finding 'Application' 'Java Runtime Environment' "Installed (v$($javaKey.CurrentVersion))" 'Medium' `
+                'Java is a frequent attack vector -- remove if not actively needed' `
+                'Uninstall via: Settings > Apps, or keep fully updated via java.com'
+        } else {
+            Add-Finding 'Application' 'Java Runtime Environment' 'Not installed' 'Good' `
+                'Java not found -- reduces web-based exploit exposure'
+        }
+    } catch { }
+
+    # Installed browser detection (version reporting only)
+    try {
+        $chromePath = 'HKLM:\SOFTWARE\Google\Chrome\BLBeacon'
+        $chromeVer  = (Get-ItemProperty -Path $chromePath -Name 'version' -ErrorAction SilentlyContinue).version
+        if ($chromeVer) {
+            Add-Finding 'Application' 'Google Chrome' "Installed (v$chromeVer)" 'Info' `
+                'Ensure Chrome is set to update automatically'
+        }
+    } catch { }
+
+    try {
+        $ffPath = 'HKLM:\SOFTWARE\Mozilla\Mozilla Firefox'
+        $ffVer  = (Get-ItemProperty -Path $ffPath -Name 'CurrentVersion' -ErrorAction SilentlyContinue).CurrentVersion
+        if (-not $ffVer) {
+            $ffVer = (Get-ItemProperty `
+                -Path 'HKLM:\SOFTWARE\Wow6432Node\Mozilla\Mozilla Firefox' `
+                -Name 'CurrentVersion' -ErrorAction SilentlyContinue).CurrentVersion
+        }
+        if ($ffVer) {
+            Add-Finding 'Application' 'Mozilla Firefox' "Installed (v$ffVer)" 'Info' `
+                'Ensure Firefox is set to update automatically'
+        }
+    } catch { }
+}
+
+function Get-AuthenticationSecurity {
+    Write-ColorOutput "`n21. AUTHENTICATION AND ACCOUNT POLICY" 'Header'
+    Write-ColorOutput "=======================================" 'Header'
+
+    # Autologon (serious security risk)
+    try {
+        $autoLogon = (Get-ItemProperty `
+            -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' `
+            -Name 'AutoAdminLogon' -ErrorAction SilentlyContinue).AutoAdminLogon
+        if ($autoLogon -eq '1') {
+            Add-Finding 'Authentication' 'Autologon' 'ENABLED' 'Critical' `
+                'Windows is configured to log in automatically -- anyone with physical access has full access' `
+                'Disable: run netplwiz, check "Users must enter a user name and password"'
+        } else {
+            Add-Finding 'Authentication' 'Autologon' 'Disabled' 'Good' `
+                'Automatic logon is off -- login credentials are required at startup'
+        }
+    } catch { }
+
+    # Cached logon credentials count
+    try {
+        $cachedVal = (Get-ItemProperty `
+            -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' `
+            -Name 'CachedLogonsCount' -ErrorAction SilentlyContinue).CachedLogonsCount
+        $cachedInt = if ($cachedVal) { [int]$cachedVal } else { 10 }
+        if ($cachedInt -eq 0) {
+            Add-Finding 'Authentication' 'Cached Domain Credentials' 'Disabled (0)' 'Good' `
+                'No domain credentials are cached locally'
+        } elseif ($cachedInt -gt 5) {
+            Add-Finding 'Authentication' 'Cached Domain Credentials' "$cachedInt credentials cached" 'Medium' `
+                'Cached credentials can be extracted if the device is compromised' `
+                'Reduce to 1-2: HKLM:\...\Winlogon CachedLogonsCount'
+        } else {
+            Add-Finding 'Authentication' 'Cached Domain Credentials' "$cachedInt credential(s) cached" 'Low' `
+                'A small number of cached domain credentials is acceptable'
+        }
+    } catch { }
+
+    # Account lockout policy via net accounts
+    try {
+        $netOut = (& net accounts 2>&1) -join "`n"
+
+        if ($netOut -match 'Lockout threshold:\s+(\S+)') {
+            $threshold = $Matches[1].Trim()
+            if ($threshold -eq 'Never') {
+                Add-Finding 'Authentication' 'Account Lockout Threshold' 'Never (disabled)' 'High' `
+                    'Accounts are never locked -- brute-force password attacks are unrestricted' `
+                    'Set via: Local Security Policy > Account Policies > Account Lockout Policy'
+            } elseif ([int]$threshold -le 5) {
+                Add-Finding 'Authentication' 'Account Lockout Threshold' "$threshold attempts" 'Good' `
+                    'Accounts lock after a small number of failed attempts'
+            } else {
+                Add-Finding 'Authentication' 'Account Lockout Threshold' "$threshold attempts" 'Medium' `
+                    'Consider reducing lockout threshold to 5 or fewer attempts'
+            }
+        }
+
+        if ($netOut -match 'Minimum password length:\s+(\d+)') {
+            $minLen = [int]$Matches[1].Trim()
+            if ($minLen -ge 12) {
+                Add-Finding 'Authentication' 'Minimum Password Length' "$minLen characters" 'Good' `
+                    'Password length policy enforces strong passwords'
+            } elseif ($minLen -ge 8) {
+                Add-Finding 'Authentication' 'Minimum Password Length' "$minLen characters" 'Low' `
+                    'Consider requiring at least 12 characters for stronger passwords'
+            } else {
+                Add-Finding 'Authentication' 'Minimum Password Length' "$minLen characters" 'Medium' `
+                    'Short passwords are vulnerable to brute-force attacks' `
+                    'Increase minimum length to at least 12 characters'
+            }
+        }
+
+        if ($netOut -match 'Maximum password age \(days\):\s+(\S+)') {
+            $maxAge = $Matches[1].Trim()
+            if ($maxAge -eq 'Unlimited') {
+                Add-Finding 'Authentication' 'Password Expiry' 'Never expires' 'Low' `
+                    'Passwords never expire -- consider periodic rotation or use of long passphrases'
+            } else {
+                $maxAgeInt = [int]$maxAge
+                $risk = if ($maxAgeInt -le 90) { 'Good' } elseif ($maxAgeInt -le 180) { 'Low' } else { 'Medium' }
+                Add-Finding 'Authentication' 'Password Expiry' "Every $maxAgeInt days" $risk `
+                    'Password rotation policy'
+            }
+        }
+    } catch {
+        Add-Finding 'Authentication' 'Account Policy' 'Check Failed' 'Medium' `
+            "Could not read account policy: $($_.Exception.Message)"
+    }
+}
+
 function Show-Summary {
     Write-Progress -Activity "Windows Attack Surface Analyzer" -Completed
 
@@ -975,7 +1615,7 @@ function Main {
        Comprehensive Security Assessment Tool
 
   Author : NubleX / Igor Dunaev
-  Version: 0.2.0
+  Version: 0.3.0
   System : $osLabel (Build $script:WinBuild, $script:OSArch)
   Engine : $psLabel
 ================================================
@@ -1030,6 +1670,30 @@ function Main {
 
     Write-ScanProgress "PowerShell security"
     Get-PowerShellSecurity
+
+    Write-ScanProgress "Defender ASR rules and scan status"
+    Get-DefenderExtended
+
+    Write-ScanProgress "Exploit protection (ASLR / SEHOP / CFG)"
+    Get-ExploitProtection
+
+    Write-ScanProgress "Privacy settings"
+    Get-PrivacySettings
+
+    Write-ScanProgress "Network security (IPv6 / DoH / Wi-Fi / Bluetooth)"
+    Get-NetworkSecurity
+
+    Write-ScanProgress "Remote access security (RDP / WinRM)"
+    Get-RemoteAccessSecurity
+
+    Write-ScanProgress "Windows Subsystem for Linux"
+    Get-WSLSecurity
+
+    Write-ScanProgress "Application security (browsers / Java)"
+    Get-ApplicationSecurity
+
+    Write-ScanProgress "Authentication and account policy"
+    Get-AuthenticationSecurity
 
     # ── Export and summarise ──────────────────────────────────────────────────
     Export-Results
