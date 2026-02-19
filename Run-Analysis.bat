@@ -6,7 +6,7 @@ color 0A
 echo.
 echo  ============================================
 echo        Windows Attack Surface Analyzer
-echo        Security Assessment Tool v0.2.0
+echo        Security Assessment Tool v0.4.0
 echo  ============================================
 echo.
 
